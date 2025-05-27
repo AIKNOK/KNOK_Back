@@ -11,6 +11,7 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 """
 
 from pathlib import Path
+from decouple import config
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -39,6 +40,7 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     'myapp',
     'rest_framework',
+    'storages'
 ]
 
 MIDDLEWARE = [
@@ -124,6 +126,20 @@ STATIC_URL = 'static/'
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 # AWS Cognito 설정
-AWS_REGION = 'ap-northeast-2'  # 서울 리전
+AWS_REGION = config("AWS_REGION")
+COGNITO_USER_POOL_ID = config("COGNITO_USER_POOL_ID")
 COGNITO_APP_CLIENT_ID = '126j419a8sf0pot0obuvduh25a' 
 COGNITO_APP_CLIENT_SECRET = 'dktsfb8hqtiklpucsbv5ioepkk9tm6bvu94tqt3p8ircqff42g7'
+
+# --- AWS S3 설정 ---
+AWS_ACCESS_KEY_ID = config('AWS_ACCESS_KEY_ID')
+AWS_SECRET_ACCESS_KEY = config('AWS_SECRET_ACCESS_KEY')
+AWS_STORAGE_BUCKET_NAME = config('AWS_STORAGE_BUCKET_NAME')
+AWS_S3_REGION_NAME = config('AWS_S3_REGION_NAME')
+AWS_S3_CUSTOM_DOMAIN = f"{AWS_STORAGE_BUCKET_NAME}.s3.amazonaws.com"
+
+REST_FRAMEWORK = {
+    'DEFAULT_AUTHENTICATION_CLASSES': [
+        'myapp.authentication.CognitoJWTAuthentication',
+    ]
+}

@@ -1,8 +1,18 @@
 from django.urls import path
-from . import views
+from .views import (
+    signup,
+    confirm_email,
+    login,
+    logout_view,
+    ResumeUploadView,
+    ResumeDeleteView,
+)
 
 urlpatterns = [
-    path('signup/', views.signup),
-    path('login/', views.login),
-    path('confirm-email/', views.confirm_email), 
+    path('signup/', signup, name='signup'),
+    path('confirm-email/', confirm_email, name='confirm_email'),
+    path('login/', login, name='login'),
+    path('logout/', logout_view, name='logout'),
+    path('resume/upload/', ResumeUploadView.as_view(), name='resume-upload'),
+    path('resume/delete/', ResumeDeleteView.as_view(), name='resume-delete'),
 ]

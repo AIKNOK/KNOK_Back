@@ -3,6 +3,8 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from rest_framework import status
+from rest_framework.decorators import authentication_classes, permission_classes
+
 
 import boto3
 import hmac
@@ -91,8 +93,16 @@ def login(request):
                 'SECRET_HASH': get_secret_hash(email)
             }
         )
-        token = response['AuthenticationResult']['IdToken']
-        return Response({'message': '로그인되었습니다', 'token': token})
+        auth_result = response['AuthenticationResult']
+        id_token = auth_result['IdToken']
+        access_token = auth_result['AccessToken']
+
+        return Response({
+            'message': '로그인되었습니다',
+            'id_token': id_token,
+            'access_token': access_token
+        })
+
     except client.exceptions.NotAuthorizedException:
         return Response({'error': '아이디 또는 비밀번호 오류'}, status=400)
     except Exception as e:
@@ -151,3 +161,25 @@ class ResumeDeleteView(APIView):
         s3.delete_object(Bucket=settings.AWS_STORAGE_BUCKET_NAME, Key=key)
         resume.delete()
         return Response({"message": "이력서 삭제 완료"}, status=204)
+
+# 🚪 로그아웃 API
+@api_view(['POST'])
+@authentication_classes([])  # 인증 미적용
+@permission_classes([])      # 권한 미적용
+def logout_view(request):
+    token = request.headers.get('Authorization')
+    if not token:
+        return Response({'error': 'Authorization 헤더가 없습니다.'}, status=400)
+
+    token = token.replace('Bearer ', '')  # 토큰 앞에 'Bearer '가 붙어 있으면 제거
+
+    client = boto3.client('cognito-idp', region_name=settings.AWS_REGION)
+    try:
+        client.global_sign_out(
+            AccessToken=token
+        )
+        return Response({'message': '로그아웃 되었습니다.'})
+    except client.exceptions.NotAuthorizedException:
+        return Response({'error': '유효하지 않은 토큰입니다.'}, status=401)
+    except Exception as e:
+        return Response({'error': str(e)}, status=400)

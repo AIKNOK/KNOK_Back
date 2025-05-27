@@ -8,9 +8,7 @@ from django.conf import settings
 COGNITO_POOL_ID = settings.COGNITO_USER_POOL_ID
 COGNITO_REGION = settings.AWS_REGION
 APP_CLIENT_ID = settings.COGNITO_APP_CLIENT_ID
-
 JWKS_URL = f"https://cognito-idp.{COGNITO_REGION}.amazonaws.com/{COGNITO_POOL_ID}/.well-known/jwks.json"
-
 
 class CognitoJWTAuthentication(BaseAuthentication):
     def authenticate(self, request):
@@ -21,7 +19,6 @@ class CognitoJWTAuthentication(BaseAuthentication):
         token = auth_header.split(' ')[1]
 
         try:
-            # 🔑 PyJWT 공식 키 가져오기 방식 사용
             jwk_client = PyJWKClient(JWKS_URL)
             signing_key = jwk_client.get_signing_key_from_jwt(token).key
 
@@ -36,7 +33,6 @@ class CognitoJWTAuthentication(BaseAuthentication):
             if not username:
                 raise AuthenticationFailed("이메일이 토큰에 없습니다.")
 
-            # Django 유저 매핑
             user, _ = User.objects.get_or_create(username=username, defaults={"email": username})
             return (user, token)
 

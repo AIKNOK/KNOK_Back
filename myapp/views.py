@@ -15,7 +15,6 @@ from .models import Resume
 from .serializers import ResumeSerializer
 
 
-# 🔐 SECRET_HASH 계산 함수 (Cognito)
 def get_secret_hash(username):
     message = username + settings.COGNITO_APP_CLIENT_ID
     digest = hmac.new(
@@ -26,7 +25,6 @@ def get_secret_hash(username):
     return base64.b64encode(digest).decode()
 
 
-# 📝 회원가입 API
 @api_view(['POST'])
 def signup(request):
     email = request.data.get('email')
@@ -49,7 +47,6 @@ def signup(request):
         return Response({'error': str(e)}, status=400)
 
 
-# ✅ 이메일 인증 API
 @api_view(['POST'])
 def confirm_email(request):
     email = request.data.get('email')
@@ -73,7 +70,6 @@ def confirm_email(request):
         return Response({'error': str(e)}, status=400)
 
 
-# 🔑 로그인 API
 @api_view(['POST'])
 def login(request):
     email = request.data.get('email')
@@ -99,7 +95,6 @@ def login(request):
         return Response({'error': str(e)}, status=400)
 
 
-# 📤 이력서 업로드 API (S3 저장)
 class ResumeUploadView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -116,21 +111,15 @@ class ResumeUploadView(APIView):
             region_name=settings.AWS_S3_REGION_NAME
         )
 
-        # S3 업로드
         s3.upload_fileobj(file, settings.AWS_STORAGE_BUCKET_NAME, filename)
-
         file_url = f"https://{settings.AWS_S3_CUSTOM_DOMAIN}/{filename}"
 
-        # 기존 이력서 삭제
         Resume.objects.filter(user=request.user).delete()
-
-        # DB에 저장
         resume = Resume.objects.create(user=request.user, file_url=file_url)
         serializer = ResumeSerializer(resume)
         return Response(serializer.data, status=201)
 
 
-# 🗑️ 이력서 삭제 API
 class ResumeDeleteView(APIView):
     permission_classes = [IsAuthenticated]
 

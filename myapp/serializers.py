@@ -4,4 +4,4 @@ from .models import Resume
 class ResumeSerializer(serializers.ModelSerializer):
     class Meta:
         model = Resume
-        fields = ['file_url', 'uploaded_at']
+        fields = ['id', 'file_url', 'uploaded_at']

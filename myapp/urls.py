@@ -6,6 +6,7 @@ from .views import (
     logout_view,
     ResumeUploadView,
     ResumeDeleteView,
+    receive_posture_count,
 )
 
 urlpatterns = [
@@ -15,4 +16,5 @@ urlpatterns = [
     path('logout/', logout_view, name='logout'),
     path('resume/upload/', ResumeUploadView.as_view(), name='resume-upload'),
     path('resume/delete/', ResumeDeleteView.as_view(), name='resume-delete'),
+    path('posture/', receive_posture_count, name='posture'),
 ]

@@ -183,3 +183,9 @@ def logout_view(request):
         return Response({'error': '유효하지 않은 토큰입니다.'}, status=401)
     except Exception as e:
         return Response({'error': str(e)}, status=400)
+
+@api_view(['POST'])
+def receive_posture_count(request):
+    count = request.data.get('count')
+    print(f"[백엔드 수신] 자세 count: {count}")
+    return Response({"message": "count 수신 완료", "count": count})

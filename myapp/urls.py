@@ -1,4 +1,5 @@
 from django.urls import path
+from .views import analyze_voice_api
 from .views import (
     signup,
     confirm_email,
@@ -15,4 +16,5 @@ urlpatterns = [
     path('logout/', logout_view, name='logout'),
     path('resume/upload/', ResumeUploadView.as_view(), name='resume-upload'),
     path('resume/delete/', ResumeDeleteView.as_view(), name='resume-delete'),
+    path('analyze/', analyze_voice_api),
 ]

@@ -11,11 +11,14 @@ import hmac
 import hashlib
 import base64
 import uuid
+import tempfile
+import librosa
+import numpy as np
 
 from django.conf import settings
 from .models import Resume
 from .serializers import ResumeSerializer
-
+from django.http import JsonResponse
 
 # 🔐 SECRET_HASH 계산 함수 (Cognito)
 def get_secret_hash(username):
@@ -183,3 +186,51 @@ def logout_view(request):
         return Response({'error': '유효하지 않은 토큰입니다.'}, status=401)
     except Exception as e:
         return Response({'error': str(e)}, status=400)
+
+#s3 에서 파일 가져오기
+def download_audio_from_s3(bucket, key):
+    s3 = boto3.client('s3')
+    temp = tempfile.NamedTemporaryFile(delete=False)
+    s3.download_fileobj(bucket, key, temp)
+    return temp.name
+
+# 🔍 Pitch 분석 → 떨림 여부 판단
+def analyze_pitch(file_path):
+    y, sr = librosa.load(file_path, sr=None)
+    pitches, magnitudes = librosa.piptrack(y=y, sr=sr)
+    pitch_values = pitches[pitches > 0]
+    pitch_std = np.std(pitch_values)
+    return {
+        'pitch_std': float(round(pitch_std, 2)),  # float32 → float 로 변환
+        'voice_tremor': '감지됨' if pitch_std > 20 else '안정적'
+    }
+
+# 🧠 Claude 3에게 보낼 프롬프트 생성
+def create_prompt(analysis):
+    return f"""
+사용자의 면접 음성 분석 결과는 다음과 같습니다:
+
+- 목소리 떨림: {analysis['voice_tremor']}
+- Pitch 표준편차: {analysis['pitch_std']}
+
+이 데이터를 바탕으로 면접자가 개선할 점과 칭찬할 점을 포함한 피드백을 자연스럽게 2~3문장으로 작성해주세요.
+"""
+
+# 📡 분석 결과 + 프롬프트 확인 API
+@api_view(['GET'])
+def analyze_voice_api(request):
+    bucket = 'whisper-testt'  # 실제 버킷 이름
+    key = 'audio/input.wav'  # 실제 S3 오디오 경로
+
+    try:
+        audio_path = download_audio_from_s3(bucket, key)
+        analysis = analyze_pitch(audio_path)
+        prompt = create_prompt(analysis)
+
+        return JsonResponse({
+            'analysis': analysis,
+            'prompt_to_claude': prompt
+        }, json_dumps_params={'ensure_ascii': False})
+
+    except Exception as e:
+        return JsonResponse({'error': str(e)}, status=500)

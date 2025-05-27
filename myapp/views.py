@@ -187,6 +187,7 @@ def logout_view(request):
     except Exception as e:
         return Response({'error': str(e)}, status=400)
 
+
 #s3 에서 파일 가져오기
 def download_audio_from_s3(bucket, key):
     s3 = boto3.client('s3')
@@ -234,3 +235,11 @@ def analyze_voice_api(request):
 
     except Exception as e:
         return JsonResponse({'error': str(e)}, status=500)
+
+#잘못된 자세 카운트
+@api_view(['POST'])
+def receive_posture_count(request):
+    count = request.data.get('count')
+    print(f"[백엔드 수신] 자세 count: {count}")
+    return Response({"message": "count 수신 완료", "count": count})
+

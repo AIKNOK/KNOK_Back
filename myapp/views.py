@@ -5,6 +5,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework import status
 from rest_framework.decorators import authentication_classes, permission_classes
 
+import json
 import whisper
 import boto3
 import hmac
@@ -190,6 +191,32 @@ def logout_view(request):
         return Response({'error': str(e)}, status=400)
 
 
+# Claude 3 호출 함수 추가
+def get_claude_feedback(prompt):
+    client = boto3.client("bedrock-runtime", region_name="us-east-1")
+
+    body = {
+        "anthropic_version": "bedrock-2023-05-31",
+        "max_tokens": 512,
+        "temperature": 0.7,
+        "messages": [
+            {
+                "role": "user",
+                "content": prompt
+            }
+        ]
+    }
+
+    response = client.invoke_model(
+        modelId="anthropic.claude-3-haiku-20240307-v1:0",
+        contentType="application/json",
+        accept="application/json",
+        body=json.dumps(body)
+    )
+
+    result = json.loads(response["body"].read())
+    return result["content"][0]["text"] if result.get("content") else "Claude 응답 없음"
+
 #s3 에서 파일 가져오기
 def download_audio_from_s3(bucket, key):
     s3 = boto3.client('s3')
@@ -296,11 +323,16 @@ def analyze_voice_api(request):
         }
 
         prompt = create_prompt(result)
+        feedback = get_claude_feedback(prompt)
 
-        return JsonResponse({
-            'analysis': result,
-            'prompt_to_claude': prompt
-        }, json_dumps_params={'ensure_ascii': False})
+        return JsonResponse(
+            json.loads(json.dumps({
+                'analysis': result,
+                'prompt_to_claude': prompt,
+                'claude_feedback': feedback
+            }, ensure_ascii=False, indent=4)),
+            json_dumps_params={'ensure_ascii': False}
+        )
 
     except Exception as e:
         return JsonResponse({'error': str(e)}, status=500)

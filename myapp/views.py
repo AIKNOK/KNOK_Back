@@ -115,7 +115,7 @@ def login(request):
         return Response({'error': str(e)}, status=400)
 
 
-# 📤 이력서 업로드 API (S3 저장)
+# 📤 이력서 업로드 API (S3 저장, DB 기록, 중복 업로드 차단)
 class ResumeUploadView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -124,7 +124,14 @@ class ResumeUploadView(APIView):
         if not file:
             return Response({"error": "파일이 없습니다."}, status=400)
 
-        filename = f"resumes/user_{request.user.id}/resume.pdf"
+        # ✅ 이미 업로드된 이력서가 있는 경우 업로드 차단
+        if Resume.objects.filter(user=request.user).exists():
+            return Response({"error": "이미 이력서를 업로드하셨습니다. 삭제 후 다시 업로드하세요."}, status=400)
+
+        # ✅ 이메일의 @ 앞부분만 사용
+        email_prefix = request.user.email.split('@')[0]
+        filename = f"resumes/{email_prefix}/resume.pdf"
+
         s3 = boto3.client(
             's3',
             aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
@@ -132,21 +139,19 @@ class ResumeUploadView(APIView):
             region_name=settings.AWS_S3_REGION_NAME
         )
 
-        # S3 업로드
-        s3.upload_fileobj(file, settings.AWS_STORAGE_BUCKET_NAME, filename)
+        try:
+            s3.upload_fileobj(file, settings.AWS_STORAGE_BUCKET_NAME, filename)
+        except Exception as e:
+            return Response({"error": f"S3 업로드 실패: {str(e)}"}, status=500)
 
         file_url = f"https://{settings.AWS_S3_CUSTOM_DOMAIN}/{filename}"
 
-        # 기존 이력서 삭제
-        Resume.objects.filter(user=request.user).delete()
-
-        # DB에 저장
         resume = Resume.objects.create(user=request.user, file_url=file_url)
         serializer = ResumeSerializer(resume)
         return Response(serializer.data, status=201)
 
 
-# 🗑️ 이력서 삭제 API
+# 🗑️ 이력서 삭제 API (S3 삭제 + DB 삭제)
 class ResumeDeleteView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -155,7 +160,8 @@ class ResumeDeleteView(APIView):
         if not resume:
             return Response({"error": "업로드된 이력서가 없습니다."}, status=404)
 
-        key = resume.file_url.split(f"{settings.AWS_S3_CUSTOM_DOMAIN}/")[-1]
+        # S3 경로 추출
+        s3_key = resume.file_url.split(f"{settings.AWS_S3_CUSTOM_DOMAIN}/")[-1]
 
         s3 = boto3.client(
             's3',
@@ -164,9 +170,14 @@ class ResumeDeleteView(APIView):
             region_name=settings.AWS_S3_REGION_NAME
         )
 
-        s3.delete_object(Bucket=settings.AWS_STORAGE_BUCKET_NAME, Key=key)
+        try:
+            s3.delete_object(Bucket=settings.AWS_STORAGE_BUCKET_NAME, Key=s3_key)
+        except Exception as e:
+            return Response({"error": f"S3 삭제 실패: {str(e)}"}, status=500)
+
         resume.delete()
         return Response({"message": "이력서 삭제 완료"}, status=204)
+
 
 # 🚪 로그아웃 API
 @api_view(['POST'])

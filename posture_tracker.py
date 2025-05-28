@@ -61,7 +61,8 @@ cv2.destroyAllWindows()
 
 # Django API로 count 전송
 response = requests.post(
-    "http://127.0.0.1:8000/api/posture/",
-    json={"count": bad_posture_count}
+    "http://127.0.0.1:8000/api/analyze/",
+    json={"posture_count": bad_posture_count}
 )
-print("✅ 서버 응답:", response.json())
+print("✅ Claude 분석 결과:")
+print(response.json())

@@ -16,6 +16,7 @@ import tempfile
 import librosa
 import numpy as np
 import parselmouth
+import time
 
 from django.conf import settings
 from .models import Resume
@@ -300,23 +301,42 @@ def analyze_emotion(file_path):
 
 # 🧠 Claude 3에게 보낼 프롬프트 생성
 def create_prompt(analysis):
-    return f"""
-사용자의 면접 음성 분석 결과는 다음과 같습니다:
+    posture_count = analysis.get("posture_count", None)
 
+    # ✅ 자세 설명 프롬프트
+    posture_desc = f"면접 중 총 {posture_count}회의 자세 흔들림이 감지되었습니다. 이 수치를 바탕으로 면접 자세에 대한 피드백을 자연스럽게 작성해주세요."
+
+    # ✅ 음성 분석 설명
+    voice_desc = f"""
 - 목소리 떨림: {analysis['voice_tremor']}
 - Pitch 표준편차: {analysis['pitch_std']}
 - 말 속도: {analysis['speech_rate']} 단어/초
 - 침묵 비율: {analysis['silence_ratio'] * 100:.1f}%
 - 감정 상태: {analysis['emotion']}
+"""
 
-이 데이터를 바탕으로 면접자가 개선할 점과 칭찬할 점을 포함한 피드백을 자연스럽게 2~3문장으로 작성해주세요.
+    # ✅ 최종 프롬프트
+    return f"""
+당신은 면접 코치입니다. 아래는 면접자의 분석 데이터입니다.
+
+[음성 분석 결과]
+{voice_desc}
+
+[자세 분석 결과]
+{posture_desc}
+
+위 데이터를 바탕으로 각각 "음성 피드백"과 "자세 피드백"을 2~3문장으로 각각 나누어 제공해주세요.
 """
 
 # API 뷰: 전체 분석 + 프롬프트
-@api_view(['GET'])
+@api_view(['POST'])
 def analyze_voice_api(request):
+    start_time = time.time()
+
     bucket = 'whisper-testt'
     key = 'audio/input.wav'
+
+    posture_count = request.data.get('posture_count', 0)
 
     try:
         audio_path = download_audio_from_s3(bucket, key)
@@ -330,24 +350,28 @@ def analyze_voice_api(request):
             **pitch_result,
             'speech_rate': speech_rate,
             'silence_ratio': silence_ratio,
-            'emotion': emotion
+            'emotion': emotion,
+            'posture_count': posture_count
         }
 
         prompt = create_prompt(result)
         feedback = get_claude_feedback(prompt)
 
+        elapsed_time = round(time.time() - start_time, 2)  # ⏱ 이거 꼭 필요함
+
         return JsonResponse(
             json.loads(json.dumps({
                 'analysis': result,
                 'prompt_to_claude': prompt,
-                'claude_feedback': feedback
+                'claude_feedback': feedback,
+                'response_time_seconds': elapsed_time
             }, ensure_ascii=False, indent=4)),
             json_dumps_params={'ensure_ascii': False}
         )
 
     except Exception as e:
         return JsonResponse({'error': str(e)}, status=500)
-
+    
 #잘못된 자세 카운트
 @api_view(['POST'])
 def receive_posture_count(request):

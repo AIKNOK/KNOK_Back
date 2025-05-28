@@ -1,5 +1,6 @@
 from django.urls import path
 from .views import analyze_voice_api
+from .views import get_resume_view 
 from .views import (
     signup,
     confirm_email,
@@ -19,4 +20,5 @@ urlpatterns = [
     path('resume/delete/', ResumeDeleteView.as_view(), name='resume-delete'),
     path('analyze/', analyze_voice_api),
     path('posture/', receive_posture_count, name='posture'),
+    path('api/resume/', get_resume_view, name='get_resume'),
 ]

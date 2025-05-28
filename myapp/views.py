@@ -121,17 +121,15 @@ class ResumeUploadView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
-        file = request.FILES.get('resume')
-        if not file:
+        # 1) 파일 유무 체크
+        uploaded_file = request.FILES.get('resume')
+        if not uploaded_file:
             return Response({"error": "파일이 없습니다."}, status=400)
 
-        # ✅ 이미 업로드된 이력서가 있는 경우 업로드 차단
-        if Resume.objects.filter(user=request.user).exists():
-            return Response({"error": "이미 이력서를 업로드하셨습니다. 삭제 후 다시 업로드하세요."}, status=400)
-
-        # ✅ 이메일의 @ 앞부분만 사용
+        # ✅ 2) 사용자 이메일 + 원본 파일명으로 S3 경로 구성
         email_prefix = request.user.email.split('@')[0]
-        filename = f"resumes/{email_prefix}/resume.pdf"
+        original_filename = uploaded_file.name
+        key = f"resumes/{email_prefix}/{original_filename}"
 
         s3 = boto3.client(
             's3',
@@ -141,18 +139,22 @@ class ResumeUploadView(APIView):
         )
 
         try:
-            s3.upload_fileobj(file, settings.AWS_STORAGE_BUCKET_NAME, filename)
+            s3.upload_fileobj(uploaded_file, settings.AWS_STORAGE_BUCKET_NAME, key)
         except Exception as e:
             return Response({"error": f"S3 업로드 실패: {str(e)}"}, status=500)
 
-        file_url = f"https://{settings.AWS_S3_CUSTOM_DOMAIN}/{filename}"
+        file_url = f"https://{settings.AWS_S3_CUSTOM_DOMAIN}/{key}"
 
-        resume = Resume.objects.create(user=request.user, file_url=file_url)
-        serializer = ResumeSerializer(resume)
+        # ✅ 3) DB에도 업데이트 (이전 것 덮어씀)
+        resume_obj, created = Resume.objects.update_or_create(
+            user=request.user,
+            defaults={'file_url': file_url}
+        )
+
+        serializer = ResumeSerializer(resume_obj)
         return Response(serializer.data, status=201)
 
 
-# 🗑️ 이력서 삭제 API (S3 삭제 + DB 삭제)
 class ResumeDeleteView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -161,24 +163,32 @@ class ResumeDeleteView(APIView):
         if not resume:
             return Response({"error": "업로드된 이력서가 없습니다."}, status=404)
 
-        # S3 경로 추출
+        # S3 객체 삭제
         s3_key = resume.file_url.split(f"{settings.AWS_S3_CUSTOM_DOMAIN}/")[-1]
-
         s3 = boto3.client(
             's3',
             aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
             aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
             region_name=settings.AWS_S3_REGION_NAME
         )
-
         try:
             s3.delete_object(Bucket=settings.AWS_STORAGE_BUCKET_NAME, Key=s3_key)
         except Exception as e:
             return Response({"error": f"S3 삭제 실패: {str(e)}"}, status=500)
 
+        # DB 레코드 삭제
         resume.delete()
         return Response({"message": "이력서 삭제 완료"}, status=204)
 
+# 🧾 이력서 조회 API (새로고침 시 프론트에서 조회)
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def get_resume_view(request):
+    try:
+        resume = Resume.objects.get(user=request.user)
+        return Response({'file_url': resume.file_url}, status=200)
+    except Resume.DoesNotExist:
+        return Response({'file_url': None}, status=200)
 
 # 🚪 로그아웃 API
 @api_view(['POST'])

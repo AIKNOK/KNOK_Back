@@ -123,7 +123,7 @@ class ResumeUploadView(APIView):
         if not file:
             return Response({"error": "파일이 없습니다."}, status=400)
 
-        filename = f"resumes/{uuid.uuid4()}_{file.name}"
+        filename = f"resumes/user_{request.user.id}/resume.pdf"
         s3 = boto3.client(
             's3',
             aws_access_key_id=settings.AWS_ACCESS_KEY_ID,

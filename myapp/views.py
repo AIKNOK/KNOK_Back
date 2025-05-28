@@ -5,7 +5,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework import status
 from rest_framework.decorators import authentication_classes, permission_classes
 
-
+import whisper
 import boto3
 import hmac
 import hashlib
@@ -14,11 +14,13 @@ import uuid
 import tempfile
 import librosa
 import numpy as np
+import parselmouth
 
 from django.conf import settings
 from .models import Resume
 from .serializers import ResumeSerializer
 from django.http import JsonResponse
+from pathlib import Path
 
 # 🔐 SECRET_HASH 계산 함수 (Cognito)
 def get_secret_hash(username):
@@ -205,6 +207,58 @@ def analyze_pitch(file_path):
         'voice_tremor': '감지됨' if pitch_std > 20 else '안정적'
     }
 
+# ✅ 2. 말 속도 분석 (whisper 사용)
+def analyze_speech_rate(file_path):
+    try:
+        model = whisper.load_model("base")
+        result = model.transcribe(file_path)
+        words = result["text"].split()
+        word_count = len(words)
+
+        y, sr = librosa.load(file_path, sr=None)
+        duration = librosa.get_duration(y=y, sr=sr)
+
+        if duration == 0:
+            return 0.0
+
+        return round(word_count / duration, 2)
+
+    except Exception as e:
+        print("❌ 말 속도 분석 실패:", e)
+        return 0.0
+
+# ✅ 3. 침묵 비율 분석 (librosa 사용)
+def analyze_silence_ratio(file_path):
+    y, sr = librosa.load(file_path)
+    intervals = librosa.effects.split(y, top_db=30)
+    total_duration = librosa.get_duration(y=y, sr=sr)
+    speech_duration = sum((end - start) for start, end in intervals) / sr
+    silence_ratio = 1 - (speech_duration / total_duration)
+    return round(silence_ratio, 2)
+
+# ✅ 4. 감정 상태 추정 (parselmouth 사용)
+def analyze_emotion(file_path):
+    snd = parselmouth.Sound(file_path)
+    pitch = snd.to_pitch()
+    pitch_values = []
+
+    for i in range(pitch.get_number_of_frames()):
+        val = pitch.get_value_in_frame(i)
+        if val is not None and val != 0:
+            pitch_values.append(val)
+
+    if not pitch_values:
+        return "데이터 없음"
+
+    stdev = np.std(pitch_values)
+
+    if stdev < 20:
+        return "침착함"
+    elif stdev < 60:
+        return "자신감 있음"
+    else:
+        return "긴장함"
+
 # 🧠 Claude 3에게 보낼 프롬프트 생성
 def create_prompt(analysis):
     return f"""
@@ -212,23 +266,38 @@ def create_prompt(analysis):
 
 - 목소리 떨림: {analysis['voice_tremor']}
 - Pitch 표준편차: {analysis['pitch_std']}
+- 말 속도: {analysis['speech_rate']} 단어/초
+- 침묵 비율: {analysis['silence_ratio'] * 100:.1f}%
+- 감정 상태: {analysis['emotion']}
 
 이 데이터를 바탕으로 면접자가 개선할 점과 칭찬할 점을 포함한 피드백을 자연스럽게 2~3문장으로 작성해주세요.
 """
 
-# 📡 분석 결과 + 프롬프트 확인 API
+# API 뷰: 전체 분석 + 프롬프트
 @api_view(['GET'])
 def analyze_voice_api(request):
-    bucket = 'whisper-testt'  # 실제 버킷 이름
-    key = 'audio/input.wav'  # 실제 S3 오디오 경로
+    bucket = 'whisper-testt'
+    key = 'audio/input.wav'
 
     try:
         audio_path = download_audio_from_s3(bucket, key)
-        analysis = analyze_pitch(audio_path)
-        prompt = create_prompt(analysis)
+
+        pitch_result = analyze_pitch(audio_path)
+        speech_rate = analyze_speech_rate(audio_path)
+        silence_ratio = analyze_silence_ratio(audio_path)
+        emotion = analyze_emotion(audio_path)
+
+        result = {
+            **pitch_result,
+            'speech_rate': speech_rate,
+            'silence_ratio': silence_ratio,
+            'emotion': emotion
+        }
+
+        prompt = create_prompt(result)
 
         return JsonResponse({
-            'analysis': analysis,
+            'analysis': result,
             'prompt_to_claude': prompt
         }, json_dumps_params={'ensure_ascii': False})
 

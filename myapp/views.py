@@ -18,6 +18,7 @@ import librosa
 import numpy as np
 import parselmouth
 import time
+import PyPDF2
 
 from django.conf import settings
 from .models import Resume
@@ -116,6 +117,27 @@ def login(request):
     except Exception as e:
         return Response({'error': str(e)}, status=400)
 
+# 🚪 로그아웃 API
+@api_view(['POST'])
+@authentication_classes([])  # 인증 미적용
+@permission_classes([])      # 권한 미적용
+def logout_view(request):
+    token = request.headers.get('Authorization')
+    if not token:
+        return Response({'error': 'Authorization 헤더가 없습니다.'}, status=400)
+
+    token = token.replace('Bearer ', '')  # 토큰 앞에 'Bearer '가 붙어 있으면 제거
+
+    client = boto3.client('cognito-idp', region_name=settings.AWS_REGION)
+    try:
+        client.global_sign_out(
+            AccessToken=token
+        )
+        return Response({'message': '로그아웃 되었습니다.'})
+    except client.exceptions.NotAuthorizedException:
+        return Response({'error': '유효하지 않은 토큰입니다.'}, status=401)
+    except Exception as e:
+        return Response({'error': str(e)}, status=400)
 
 # 📤 이력서 업로드 API (S3 저장, DB 기록, 중복 업로드 차단)
 class ResumeUploadView(APIView):
@@ -191,27 +213,85 @@ def get_resume_view(request):
     except Resume.DoesNotExist:
         return Response({'file_url': None}, status=200)
 
-# 🚪 로그아웃 API
+# 🧠 Claude에게 이력서 기반으로 질문 요청
 @api_view(['POST'])
-@authentication_classes([])  # 인증 미적용
-@permission_classes([])      # 권한 미적용
-def logout_view(request):
-    token = request.headers.get('Authorization')
-    if not token:
-        return Response({'error': 'Authorization 헤더가 없습니다.'}, status=400)
+@permission_classes([IsAuthenticated])
+def generate_resume_questions(request):
+    user = request.user
+    email_prefix = user.email.split('@')[0]
+    bucket_in = settings.AWS_STORAGE_BUCKET_NAME  # 이력서가 있는 버킷
+    bucket_out = 'resume-questions'               # 질문 저장용 버킷
 
-    token = token.replace('Bearer ', '')  # 토큰 앞에 'Bearer '가 붙어 있으면 제거
+    s3 = boto3.client(
+    's3',
+    aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
+    aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
+    region_name=settings.AWS_S3_REGION_NAME
+    )
 
-    client = boto3.client('cognito-idp', region_name=settings.AWS_REGION)
-    try:
-        client.global_sign_out(
-            AccessToken=token
+    # 🔍 이력서가 저장된 사용자 폴더 안의 PDF 파일 찾기
+    prefix = f"resumes/{email_prefix}/"
+    response = s3.list_objects_v2(Bucket=bucket_in, Prefix=prefix)
+    pdf_files = [obj['Key'] for obj in response.get('Contents', []) if obj['Key'].endswith('.pdf')]
+
+    if not pdf_files:
+        return Response({"error": "PDF 파일이 존재하지 않습니다."}, status=404)
+
+    # ✅ 첫 번째 PDF 파일 선택
+    key = pdf_files[0]
+
+    # PDF 다운로드
+    temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
+    s3.download_fileobj(bucket_in, key, temp_file)
+    temp_file.close()
+
+    # PDF 텍스트 추출
+    with open(temp_file.name, 'rb') as f:
+        reader = PyPDF2.PdfReader(f)
+        text = "\n".join(page.extract_text() for page in reader.pages if page.extract_text())
+
+    # Claude 프롬프트 생성
+    prompt = f"""
+    다음은 이력서 내용입니다:
+    {text}
+
+    위 이력서를 바탕으로 면접 질문 3개를 만들어주세요.
+    형식은 아래와 같이 해주세요:
+    질문1: ...
+    질문2: ...
+    질문3: ...
+    """
+
+    # Claude 호출
+    client = boto3.client("bedrock-runtime", region_name="us-east-1")
+    body = {
+        "anthropic_version": "bedrock-2023-05-31",
+        "max_tokens": 512,
+        "temperature": 0.7,
+        "messages": [{"role": "user", "content": prompt}]
+    }
+    response = client.invoke_model(
+        modelId="anthropic.claude-3-haiku-20240307-v1:0",
+        contentType="application/json",
+        accept="application/json",
+        body=json.dumps(body)
+    )
+    result = json.loads(response['body'].read())
+    content = result['content'][0]['text'] if result.get("content") else ""
+
+    # 질문 분리 후 S3에 저장
+    questions = [line for line in content.strip().split('\n') if line.strip()]
+    for idx, question in enumerate(questions[:3], start=1):
+        filename = f"{email_prefix}/질문{idx}.txt"
+        s3.put_object(
+            Bucket=bucket_out,
+            Key=filename,
+            Body=question.encode('utf-8'),
+            ContentType='text/plain'
         )
-        return Response({'message': '로그아웃 되었습니다.'})
-    except client.exceptions.NotAuthorizedException:
-        return Response({'error': '유효하지 않은 토큰입니다.'}, status=401)
-    except Exception as e:
-        return Response({'error': str(e)}, status=400)
+
+    return Response({"message": "질문 저장 완료", "questions": questions[:3]})
+
 
 
 # Claude 3 호출 함수 추가

@@ -1,5 +1,6 @@
 from django.urls import path
 from .views import analyze_voice_api
+from .views import generate_resume_questions
 from .views import get_resume_view 
 from .views import (
     signup,
@@ -21,4 +22,5 @@ urlpatterns = [
     path('analyze/', analyze_voice_api),
     path('posture/', receive_posture_count, name='posture'),
     path('api/resume/', get_resume_view, name='get_resume'),
+    path('generate-questions/', generate_resume_questions, name='generate_questions'),
 ]

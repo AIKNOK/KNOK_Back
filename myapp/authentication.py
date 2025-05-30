@@ -29,7 +29,7 @@ class CognitoJWTAuthentication(BaseAuthentication):
                 token,
                 signing_key,
                 algorithms=["RS256"],
-                audience=APP_CLIENT_ID
+                options={"verify_aud": False}
             )
 
             username = decoded.get('email') or decoded.get('cognito:username')

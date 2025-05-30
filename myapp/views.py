@@ -4,6 +4,7 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from rest_framework import status
 from rest_framework.decorators import authentication_classes, permission_classes
+from pydub import AudioSegment
 
 import json
 import whisper
@@ -240,11 +241,27 @@ def get_claude_feedback(prompt):
     return result["content"][0]["text"] if result.get("content") else "Claude 응답 없음"
 
 #s3 에서 파일 가져오기
-def download_audio_from_s3(bucket, key):
+def download_multiple_audios_from_s3(bucket, prefix='audio/'):
     s3 = boto3.client('s3')
-    temp = tempfile.NamedTemporaryFile(delete=False)
-    s3.download_fileobj(bucket, key, temp)
-    return temp.name
+    response = s3.list_objects_v2(Bucket=bucket, Prefix=prefix)
+    
+    file_paths = []
+    for obj in sorted(response.get('Contents', []), key=lambda x: x['Key']):
+        key = obj['Key']
+        if key.endswith('.wav'):
+            temp = tempfile.NamedTemporaryFile(delete=False, suffix=".wav")
+            s3.download_fileobj(bucket, key, temp)
+            file_paths.append(temp.name)
+    return file_paths
+
+def merge_audio_files(file_paths):
+    combined = AudioSegment.empty()
+    for file_path in file_paths:
+        audio = AudioSegment.from_wav(file_path)
+        combined += audio
+    output_path = tempfile.NamedTemporaryFile(delete=False, suffix=".wav").name
+    combined.export(output_path, format="wav")
+    return output_path
 
 # 🔍 Pitch 분석 → 떨림 여부 판단
 def analyze_pitch(file_path):
@@ -344,17 +361,24 @@ def analyze_voice_api(request):
     start_time = time.time()
 
     bucket = 'whisper-testt'
-    key = 'audio/input.wav'
+    prefix = 'audio/'  # 여러 질문 오디오가 여기에 저장되어 있다고 가정
 
     posture_count = request.data.get('posture_count', 0)
 
     try:
-        audio_path = download_audio_from_s3(bucket, key)
+        # 1. 다중 오디오 다운로드 및 병합
+        audio_files = download_multiple_audios_from_s3(bucket, prefix)
+        merged_audio_path = merge_audio_files(audio_files)
 
-        pitch_result = analyze_pitch(audio_path)
-        speech_rate = analyze_speech_rate(audio_path)
-        silence_ratio = analyze_silence_ratio(audio_path)
-        emotion = analyze_emotion(audio_path)
+         # 🔍 병합된 오디오 길이 확인 로그 (디버깅용)
+        y, sr = librosa.load(merged_audio_path)
+        print("\u23f1 병합된 오디오 길이 (초):", librosa.get_duration(y=y, sr=sr))
+
+        # 2. 분석 시작
+        pitch_result = analyze_pitch(merged_audio_path)
+        speech_rate = analyze_speech_rate(merged_audio_path)
+        silence_ratio = analyze_silence_ratio(merged_audio_path)
+        emotion = analyze_emotion(merged_audio_path)
 
         result = {
             **pitch_result,
@@ -367,7 +391,7 @@ def analyze_voice_api(request):
         prompt = create_prompt(result)
         feedback = get_claude_feedback(prompt)
 
-        elapsed_time = round(time.time() - start_time, 2)  # ⏱ 이거 꼭 필요함
+        elapsed_time = round(time.time() - start_time, 2)
 
         return JsonResponse(
             json.loads(json.dumps({

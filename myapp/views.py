@@ -7,7 +7,6 @@ from rest_framework.decorators import authentication_classes, permission_classes
 from pydub import AudioSegment
 
 import json
-import whisper
 import boto3
 import hmac
 import hashlib
@@ -354,25 +353,44 @@ def analyze_pitch(file_path):
         'voice_tremor': '감지됨' if pitch_std > 20 else '안정적'
     }
 
-# ✅ 2. 말 속도 분석 (whisper 사용)
-def analyze_speech_rate(file_path):
-    try:
-        model = whisper.load_model("base")
-        result = model.transcribe(file_path)
-        words = result["text"].split()
-        word_count = len(words)
+# ✅ 2. 말 속도 분석 
+def upload_merged_audio_to_s3(file_path, bucket, key):
+    s3 = boto3.client('s3',
+                      aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
+                      aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
+                      region_name=settings.AWS_S3_REGION_NAME)
+    s3.upload_file(file_path, bucket, key)
 
-        y, sr = librosa.load(file_path, sr=None)
-        duration = librosa.get_duration(y=y, sr=sr)
+def start_transcribe_and_get_text(bucket, key):
+    import requests
+    transcribe = boto3.client('transcribe', region_name='ap-northeast-2')
+    job_name = f"job-{uuid.uuid4()}"
 
-        if duration == 0:
-            return 0.0
+    job_uri = f"https://{bucket}.s3.ap-northeast-2.amazonaws.com/{key}"
 
-        return round(word_count / duration, 2)
+    transcribe.start_transcription_job(
+        TranscriptionJobName=job_name,
+        Media={'MediaFileUri': job_uri},
+        MediaFormat='wav',
+        LanguageCode='ko-KR'
+    )
 
-    except Exception as e:
-        print("❌ 말 속도 분석 실패:", e)
-        return 0.0
+    # 결과 기다리기
+    while True:
+        result = transcribe.get_transcription_job(TranscriptionJobName=job_name)
+        status = result['TranscriptionJob']['TranscriptionJobStatus']
+        if status in ['COMPLETED', 'FAILED']:
+            break
+        time.sleep(3)
+
+    if status == 'COMPLETED':
+        transcript_url = result['TranscriptionJob']['Transcript']['TranscriptFileUri']
+        response = requests.get(transcript_url)
+        transcript_json = response.json()
+        return transcript_json['results']['transcripts'][0]['transcript']
+    else:
+        raise Exception("Transcription 실패")
+    
 
 # ✅ 3. 침묵 비율 분석 (librosa 사용)
 def analyze_silence_ratio(file_path):
@@ -435,6 +453,15 @@ def create_prompt(analysis):
 위 데이터를 바탕으로 각각 "음성 피드백"과 "자세 피드백"을 2~3문장으로 각각 나누어 제공해주세요.
 """
 
+def analyze_speech_rate_via_transcribe(transcribed_text, audio_path):
+    y, sr = librosa.load(audio_path, sr=None)
+    duration = librosa.get_duration(y=y, sr=sr)
+    words = transcribed_text.strip().split()
+    word_count = len(words)
+    if duration == 0:
+        return 0
+    return round(word_count / duration, 2)  # 단어 수 ÷ 총 시간(초)
+
 # API 뷰: 전체 분석 + 프롬프트
 @api_view(['POST'])
 def analyze_voice_api(request):
@@ -450,13 +477,18 @@ def analyze_voice_api(request):
         audio_files = download_multiple_audios_from_s3(bucket, prefix)
         merged_audio_path = merge_audio_files(audio_files)
 
-         # 🔍 병합된 오디오 길이 확인 로그 (디버깅용)
+        # 🔍 병합된 오디오 길이 확인 로그 (디버깅용)
         y, sr = librosa.load(merged_audio_path)
         print("\u23f1 병합된 오디오 길이 (초):", librosa.get_duration(y=y, sr=sr))
 
+        # ✅ Transcribe 분석 (STT 텍스트 추출)
+        s3_key = "merged/merged_audio.wav"
+        upload_merged_audio_to_s3(merged_audio_path, bucket, s3_key)
+        transcribe_text = start_transcribe_and_get_text(bucket, s3_key)
+
         # 2. 분석 시작
         pitch_result = analyze_pitch(merged_audio_path)
-        speech_rate = analyze_speech_rate(merged_audio_path)
+        speech_rate = analyze_speech_rate_via_transcribe(transcribe_text, merged_audio_path)
         silence_ratio = analyze_silence_ratio(merged_audio_path)
         emotion = analyze_emotion(merged_audio_path)
 

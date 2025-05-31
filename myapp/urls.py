@@ -23,4 +23,5 @@ urlpatterns = [
     path('posture/', receive_posture_count, name='posture'),
     path('api/resume/', get_resume_view, name='get_resume'),
     path('generate-questions/', generate_resume_questions, name='generate_questions'),
+    path('api/analyze-voice-speed/', analyze_voice_api, name='analyze_voice_speed'),
 ]

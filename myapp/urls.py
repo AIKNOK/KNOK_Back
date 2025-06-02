@@ -25,4 +25,5 @@ urlpatterns = [
     path('api/resume/', get_resume_view, name='get_resume'),
     path('generate-questions/', generate_resume_questions, name='generate_questions'),
     path('followup/check/', decide_followup_question, name='followup_check'),
+    path('api/analyze-voice-speed/', analyze_voice_api, name='analyze_voice_speed'),
 ]

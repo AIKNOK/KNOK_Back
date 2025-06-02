@@ -5,6 +5,9 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework import status
 from rest_framework.decorators import authentication_classes, permission_classes
 from pydub import AudioSegment
+from myapp.utils.keyword_extractor import extract_resume_keywords
+from myapp.utils.followup_logic import should_generate_followup
+from myapp.utils.token_utils import decode_cognito_id_token
 
 import json
 import whisper
@@ -493,3 +496,31 @@ def receive_posture_count(request):
     print(f"[백엔드 수신] 자세 count: {count}")
     return Response({"message": "count 수신 완료", "count": count})
 
+@api_view(['POST'])
+def decide_followup_question(request):
+    # 🔐 ID 토큰에서 사용자 이메일 추출
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header.startswith("Bearer "):
+        return Response({"error": "Authorization 헤더가 없습니다."}, status=401)
+
+    id_token = auth_header.replace("Bearer ", "")
+    email = decode_cognito_id_token(id_token)
+    if not email:
+        return Response({"detail": "이메일이 토큰에 없습니다."}, status=403)
+
+    # 🔑 request.user 대신 email 변수 사용 가능
+    resume_text = request.data.get('resume_text')
+    user_answer = request.data.get('user_answer')
+
+    if not resume_text or not user_answer:
+        return Response({'error': 'resume_text와 user_answer를 모두 포함해야 합니다.'}, status=400)
+
+    keywords = extract_resume_keywords(resume_text)
+    is_followup = should_generate_followup(user_answer, keywords)
+
+    return Response({
+        'followup': is_followup,
+        'matched_keywords': [kw for kw in keywords if kw in user_answer],
+        'all_keywords': keywords,
+        'user_email': email
+    })

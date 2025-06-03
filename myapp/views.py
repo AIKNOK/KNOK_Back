@@ -8,6 +8,7 @@ from pydub import AudioSegment
 from myapp.utils.keyword_extractor import extract_resume_keywords
 from myapp.utils.followup_logic import should_generate_followup
 from myapp.utils.token_utils import decode_cognito_id_token
+from datetime import datetime
 
 import json
 import boto3
@@ -556,3 +557,53 @@ def decide_followup_question(request):
         'all_keywords': keywords,
         'user_email': email
     })
+
+class AudioUploadView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        uploaded_file = request.FILES.get("audio")
+        transcript = request.data.get("transcript")
+        email = request.data.get("email")
+        question_id = request.data.get("question_id")
+
+        print("📥 업로드 요청 도착!")
+        print("🎧 audio:", uploaded_file)
+        print("📝 transcript:", transcript)
+        print("📧 email:", email)
+        print("❓ question_id:", question_id)
+
+        if not uploaded_file or email is None or question_id is None:
+            return Response({"error": "필수 값 누락"}, status=400)
+        # 경로 구성
+        email_prefix = email.split('@')[0]
+        timestamp = datetime.now().strftime('%Y%m%d%H%M%S')
+        s3 = boto3.client('s3', 
+            aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
+            aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
+            region_name=settings.AWS_S3_REGION_NAME
+        )
+
+        audio_key = f"audio/{email_prefix}/question_{question_id}_{timestamp}.webm"
+        text_key = f"audio/{email_prefix}/question_{question_id}_{timestamp}.txt"
+
+        # 1) 음성 저장
+        s3.upload_fileobj(
+            uploaded_file,
+            settings.AWS_AUDIO_BUCKET_NAME,  # ✅ 오디오 전용 버킷으로 수정
+            audio_key,
+            ExtraArgs={"ContentType": "audio/webm"}  # ✅ 이 키는 정확히 맞는 상태
+        )
+        # 2) 텍스트 저장
+        s3.put_object(
+            Bucket=settings.AWS_AUDIO_BUCKET_NAME,
+            Key=text_key,
+            Body=transcript.encode("utf-8"),
+            ContentType="text/plain"
+        )
+
+        return Response({
+            "message": "음성 및 텍스트 저장 완료",
+            "audio_path": audio_key,
+            "text_path": text_key
+        })

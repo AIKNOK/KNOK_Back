@@ -284,7 +284,10 @@ def generate_resume_questions(request):
 
     # 질문 분리 후 S3에 저장
     questions = [line for line in content.strip().split('\n') if line.strip()]
-    for idx, question in enumerate(questions[:3], start=1):
+    
+    final_questions = ["간단히 자기소개 부탁드릴게요"] + questions[:3]
+    
+    for idx, question in enumerate(final_questions, start=1):
         filename = f"{email_prefix}/질문{idx}.txt"
         s3.put_object(
             Bucket=bucket_out,
@@ -293,7 +296,7 @@ def generate_resume_questions(request):
             ContentType='text/plain'
         )
 
-    return Response({"message": "질문 저장 완료", "questions": questions[:3]})
+    return Response({"message": "질문 저장 완료", "questions": final_questions})
 
 
 

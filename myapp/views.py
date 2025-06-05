@@ -446,10 +446,15 @@ def create_prompt(analysis):
 - 침묵 비율: {analysis['silence_ratio'] * 100:.1f}%
 - 감정 상태: {analysis['emotion']}
 """
-
+    # 면접자의 전체 답변(텍스트)
+    transcribe_desc = analysis['transcribe_text']
+    
     # ✅ 최종 프롬프트
     return f"""
 당신은 면접 코치입니다. 아래는 면접자의 분석 데이터입니다.
+
+[전체 답변 결과]
+{transcribe_desc}
 
 [음성 분석 결과]
 {voice_desc}
@@ -457,7 +462,15 @@ def create_prompt(analysis):
 [자세 분석 결과]
 {posture_desc}
 
-위 데이터를 바탕으로 각각 "음성 피드백"과 "자세 피드백"을 2~3문장으로 각각 나누어 제공해주세요.
+위 데이터를 바탕으로 면접자의 답변을 다음 기준으로 피드백을 제시해주세요:
+1. 일관성: 답변 전체에 흐름이 있고 앞뒤가 자연스럽게 연결되는가?
+2. 논리성: 주장에 대해 명확한 이유와 근거가 있으며 논리적 흐름이 있는가?
+3. 대처능력: 예상치 못한 질문에도 당황하지 않고 유연하게 답했는가?
+4. 구체성: 추상적인 설명보다 구체적인 경험과 예시가 포함되어 있는가?
+5. 음성 피드백 : 음성 분석 결과를 기준으로 피드백을 제시해주세요.
+6. 자세 피드백 : 자세 분석 결과를 기준으로 피드백을 제시해주세요.
+
+각 피드백 결과는 2~3문장 정도의 길이로 생성하고, 최대한 핵심적인 요소를 강조해주세요.
 """
 
 def analyze_speech_rate_via_transcribe(transcribed_text, audio_path):
@@ -504,7 +517,8 @@ def analyze_voice_api(request):
             'speech_rate': speech_rate,
             'silence_ratio': silence_ratio,
             'emotion': emotion,
-            'posture_count': posture_count
+            'posture_count': posture_count,
+            'transcribe_text' : transcribe_text
         }
 
         prompt = create_prompt(result)
@@ -544,7 +558,6 @@ def decide_followup_question(request):
     if not email:
         return Response({"detail": "이메일이 토큰에 없습니다."}, status=403)
 
-    # 🔑 request.user 대신 email 변수 사용 가능
     resume_text = request.data.get('resume_text')
     user_answer = request.data.get('user_answer')
 
@@ -554,11 +567,61 @@ def decide_followup_question(request):
     keywords = extract_resume_keywords(resume_text)
     is_followup = should_generate_followup(user_answer, keywords)
 
-    return Response({
+    response_data = {
         'followup': is_followup,
         'matched_keywords': [kw for kw in keywords if kw in user_answer],
         'all_keywords': keywords,
-        'user_email': email
+
+    }
+
+    # ✅ followup이 True일 경우 Bedrock으로 질문 생성
+    if is_followup:
+        matched_keywords = [kw for kw in keywords if kw in user_answer]
+
+        prompt = f"""
+        사용자가 자기소개서에서 다음과 같은 키워드를 강조했습니다: {', '.join(keywords)}.
+        이에 대해 사용자가 다음과 같은 답변을 했습니다: "{user_answer}".
+        답변에서 특히 다음 키워드가 매칭되었습니다: {', '.join(matched_keywords)}.
+        이 답변을 기반으로, 더 깊이 있는 질문 1개를 생성해주세요.
+        질문은 매칭된 키워드와 연관지어 질문을 해주세요.(예시 : ~라고 말씀하셨는데, ~을 언급하셨는데 등등)
+        다른 문장,기호,특수문자,강조표시를 포함하지 말고 실제 면접자에게 질문을 하는 문장만 포함하세요.
+        """
+
+        try:
+            question = get_claude_followup_question(prompt)
+            response_data['generated_question'] = question.strip()
+        except Exception as e:
+            response_data['generated_question'] = None
+            response_data['bedrock_error'] = str(e)
+
+    return Response(response_data)
+
+def get_claude_followup_question(prompt):
+
+    client = boto3.client("bedrock-runtime", region_name="us-east-1")
+
+    payload = {
+        "anthropic_version": "bedrock-2023-05-31",
+        "max_tokens": 512,
+        "temperature": 0.7,
+        "messages": [
+            {
+                "role": "user",
+                "content": prompt
+            }
+        ]
+    }
+
+    response = client.invoke_model(
+        modelId="anthropic.claude-3-haiku-20240307-v1:0",
+        contentType="application/json",
+        accept="application/json",
+        body=json.dumps(payload)
+     )
+
+    result = json.loads(response["body"].read())
+    return result["content"][0]["text"] if result.get("content") else "Claude 응답 없음"
+
     })
 
 class AudioUploadView(APIView):
@@ -610,3 +673,4 @@ class AudioUploadView(APIView):
             "audio_path": audio_key,
             "text_path": text_key
         })
+

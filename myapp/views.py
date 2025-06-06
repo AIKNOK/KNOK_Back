@@ -9,6 +9,7 @@ from myapp.utils.keyword_extractor import extract_resume_keywords
 from myapp.utils.followup_logic import should_generate_followup
 from myapp.utils.token_utils import decode_cognito_id_token
 from datetime import datetime
+from threading import Thread
 
 import json
 import boto3
@@ -369,43 +370,66 @@ def upload_merged_audio_to_s3(file_path, bucket, key):
     s3.upload_file(file_path, bucket, key)
 
 # wav 파일 트랜스크라이브 -> 텍스트
-def start_transcribe_and_get_text(bucket, key):
-    import requests
-    transcribe = boto3.client('transcribe', region_name='us-east-1')
-    job_name = f"job-{uuid.uuid4()}"
-    job_uri = f"https://{bucket}.s3.us-east-1.amazonaws.com/{key}"
+def transcribe_and_upload(bucket, audio_key, text_key):
+    import requests, time, uuid, logging
+    import boto3
+    from django.conf import settings
 
-    transcribe.start_transcription_job(
-        TranscriptionJobName=job_name,
-        Media={'MediaFileUri': job_uri},
-        MediaFormat='wav',
-        LanguageCode='ko-KR'
-    )
+    try:
+        transcribe = boto3.client('transcribe', region_name='us-east-1')
+        job_name = f"job-{uuid.uuid4()}"
+        job_uri = f"https://{bucket}.s3.us-east-1.amazonaws.com/{audio_key}"
 
-    while True:
-        result = transcribe.get_transcription_job(TranscriptionJobName=job_name)
-        status = result['TranscriptionJob']['TranscriptionJobStatus']
-        if status in ['COMPLETED', 'FAILED']:
-            break
-        time.sleep(3)
+        print(f"🟡 [Start] Transcribe 시작")
 
-    if status == 'COMPLETED':
-        transcript_url = result['TranscriptionJob']['Transcript']['TranscriptFileUri']
-        response = requests.get(transcript_url)
-        transcript_json = response.json()
+        start_time = time.time()
 
-        print("✅ Transcribe 응답 URL:", transcript_url)
-        print("📄 응답 JSON:", transcript_json)
+        transcribe.start_transcription_job(
+            TranscriptionJobName=job_name,
+            Media={'MediaFileUri': job_uri},
+            MediaFormat='wav',
+            LanguageCode='ko-KR'
+        )
 
-        transcripts = transcript_json['results'].get('transcripts', [])
-        if not transcripts or 'transcript' not in transcripts[0]:
-            print("❗ Transcribe 결과가 비어 있습니다.")
-            return ""
+        while True:
+            result = transcribe.get_transcription_job(TranscriptionJobName=job_name)
+            status = result['TranscriptionJob']['TranscriptionJobStatus']
+            if status in ['COMPLETED', 'FAILED']:
+                break
+            time.sleep(2)
 
-        return transcripts[0]['transcript']
-    else:
-        raise Exception("Transcription 실패")
-    
+        elapsed = time.time() - start_time
+
+        if status == 'COMPLETED':
+            transcript_url = result['TranscriptionJob']['Transcript']['TranscriptFileUri']
+            print(f"✅ [Success] Transcribe 완료 - URL: {transcript_url}")
+            response = requests.get(transcript_url)
+            transcript_json = response.json()
+
+            # 텍스트 추출
+            transcript = transcript_json['results'].get('transcripts', [{}])[0].get('transcript', '')
+
+            print(f"📝 추출된 텍스트: {transcript}")
+            print(f"⏱️ 소요 시간: {elapsed:.2f}초")
+
+            # 텍스트를 S3에 저장
+            s3 = boto3.client('s3',
+                aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
+                aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
+                region_name=settings.AWS_S3_REGION_NAME
+            )
+            s3.put_object(
+                Bucket=bucket,
+                Key=text_key,
+                Body=transcript.encode("utf-8"),
+                ContentType="text/plain"
+            )
+            print(f"📤 S3 텍스트 업로드 성공: {text_key}")
+        else:
+            print(f"❌ [Fail] Transcribe 실패: {job_name}, 소요 시간: {elapsed:.2f}초")
+
+    except Exception as e:
+        print("🔥 [Error] 예외 발생:", str(e))
 
 # ✅ 3. 침묵 비율 분석 (librosa 사용)
 def analyze_silence_ratio(file_path):
@@ -512,7 +536,7 @@ def analyze_voice_api(request):
         # ✅ Transcribe 분석 (STT 텍스트 추출)
         s3_key = "merged/merged_audio.wav"
         upload_merged_audio_to_s3(merged_audio_path, bucket, s3_key)
-        transcribe_text = start_transcribe_and_get_text(bucket, s3_key)
+        transcribe_text = transcribe_and_upload(bucket, s3_key)
 
         # 2. 분석 시작
         pitch_result = analyze_pitch(merged_audio_path)
@@ -639,11 +663,6 @@ class AudioUploadView(APIView):
         email = request.data.get("email")
         question_id = request.data.get("question_id")
 
-        print("📥 업로드 요청 도착!")
-        print("🎧 audio:", uploaded_file)
-        print("📧 email:", email)
-        print("❓ question_id:", question_id)
-
         if not uploaded_file or email is None or question_id is None:
             return Response({"error": "필수 값 누락"}, status=400)
 
@@ -667,25 +686,12 @@ class AudioUploadView(APIView):
             ExtraArgs={"ContentType": "audio/wav"}
         )
 
-        # 2) Transcribe 호출
-        try:
-            transcript = start_transcribe_and_get_text(settings.AWS_AUDIO_BUCKET_NAME, audio_key)
-        except Exception as e:
-            return Response({"error": f"Transcribe 실패: {str(e)}"}, status=500)
+        # 2) Transcribe 백그라운드 처리
+        Thread(target=transcribe_and_upload, args=(settings.AWS_AUDIO_BUCKET_NAME, audio_key, text_key)).start()
 
-        print("📄 최종 transcript:", transcript)
-
-        # 3) 텍스트 저장
-        s3.put_object(
-            Bucket=settings.AWS_AUDIO_BUCKET_NAME,
-            Key=text_key,
-            Body=transcript.encode("utf-8"),
-            ContentType="text/plain"
-        )
-
+        # 3) 즉시 응답
         return Response({
-            "message": "음성 및 텍스트 저장 완료",
+            "message": "음성 저장 완료 (텍스트는 잠시 후 생성됩니다)",
             "audio_path": audio_key,
-            "text_path": text_key,
-            "transcript": transcript  # 디버깅용
+            "text_path": text_key  # 프론트에서 polling 또는 WebSocket으로 텍스트 도착 확인 가능
         })

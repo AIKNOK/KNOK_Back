@@ -32,6 +32,9 @@ urlpatterns = [
     path('analyze-voice/', analyze_voice_api, name='analyze_voice'),
     path('audio/upload/', AudioUploadView.as_view(), name='upload_audio_and_text'),
 
+    # ✅ 추가: 프론트에서 요청하는 경로에 맞춤
+    path('interview/feedback/generate/', analyze_voice_api, name='generate_feedback'),
+    
     # ❓ 꼬리 질문 여부 판단
     path('followup/check/', decide_followup_question, name='followup_check'),
 ]

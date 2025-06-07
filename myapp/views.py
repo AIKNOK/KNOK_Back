@@ -622,7 +622,7 @@ def get_claude_followup_question(prompt):
     result = json.loads(response["body"].read())
     return result["content"][0]["text"] if result.get("content") else "Claude 응답 없음"
 
-    })
+    
 
 class AudioUploadView(APIView):
     permission_classes = [IsAuthenticated]

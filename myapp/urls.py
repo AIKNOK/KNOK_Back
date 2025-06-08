@@ -12,6 +12,7 @@ from .views import (
     receive_posture_count,
     decide_followup_question,
     AudioUploadView,
+    get_resume_text,
 )
 
 urlpatterns = [
@@ -26,6 +27,8 @@ urlpatterns = [
     path('resume/delete/', ResumeDeleteView.as_view(), name='resume_delete'),
     path('resume/', get_resume_view, name='resume_get'),
     path('generate-resume-questions/', generate_resume_questions, name='generate_resume_questions'),
+    path('get-resume-text/', get_resume_text, name='get_resume_text'),
+
 
     # 🎤 면접 관련 (자세, 음성 분석, STT 저장)
     path('posture/', receive_posture_count, name='posture'),

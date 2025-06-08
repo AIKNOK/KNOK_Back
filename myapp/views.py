@@ -236,13 +236,17 @@ def generate_resume_questions(request):
     # 🔍 이력서가 저장된 사용자 폴더 안의 PDF 파일 찾기
     prefix = f"resumes/{email_prefix}/"
     response = s3.list_objects_v2(Bucket=bucket_in, Prefix=prefix)
-    pdf_files = [obj['Key'] for obj in response.get('Contents', []) if obj['Key'].endswith('.pdf')]
+    pdf_files = sorted(
+        [obj for obj in response.get('Contents', []) if obj['Key'].endswith('.pdf')],
+        key=lambda x: x['LastModified'],
+        reverse=True
+    )
 
     if not pdf_files:
         return Response({"error": "PDF 파일이 존재하지 않습니다."}, status=404)
 
-    # ✅ 첫 번째 PDF 파일 선택
-    key = pdf_files[0]
+    # ✅ 최신 파일 선택
+    key = pdf_files[0]['Key']
 
     # PDF 다운로드
     temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
@@ -597,6 +601,13 @@ def decide_followup_question(request):
         return Response({'error': 'resume_text와 user_answer를 모두 포함해야 합니다.'}, status=400)
 
     keywords = extract_resume_keywords(resume_text)
+    print("📌 resume_text:\n", resume_text)
+    print("📌 user_answer:\n", user_answer)
+    print("📌 키워드:", keywords)
+    print("📌 매칭된 키워드:", [kw for kw in keywords if kw in user_answer])
+    print("📌 match_count:", sum(1 for kw in keywords if kw in user_answer))
+
+    
     is_followup = should_generate_followup(user_answer, keywords)
 
     response_data = {
@@ -696,3 +707,47 @@ class AudioUploadView(APIView):
             "audio_path": audio_key,
             "text_path": text_key  # 프론트에서 polling 또는 WebSocket으로 텍스트 도착 확인 가능
         })
+
+# 이력서를 불러와 텍스트 내용 추출 후 프론트엔드에 반환
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def get_resume_text(request):
+    import PyPDF2
+    import tempfile
+    import boto3
+    import requests
+
+    try:
+        # ✅ DB에서 이력서 레코드 가져오기
+        resume = Resume.objects.get(user=request.user)
+        file_url = resume.file_url
+        key = file_url.split(f"{settings.AWS_S3_CUSTOM_DOMAIN}/")[-1]  # S3 key 추출
+
+        # ✅ Presigned URL 생성
+        s3 = boto3.client('s3',
+                          aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
+                          aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
+                          region_name=settings.AWS_S3_REGION_NAME)
+
+        url = s3.generate_presigned_url(
+            ClientMethod='get_object',
+            Params={'Bucket': settings.AWS_STORAGE_BUCKET_NAME, 'Key': key},
+            ExpiresIn=60
+        )
+
+        # ✅ 다운로드 후 텍스트 추출
+        r = requests.get(url)
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+            tmp.write(r.content)
+            tmp.flush()
+
+        with open(tmp.name, 'rb') as f:
+            reader = PyPDF2.PdfReader(f)
+            text = "\n".join(page.extract_text() for page in reader.pages if page.extract_text())
+
+        return Response({'resume_text': text})
+
+    except Resume.DoesNotExist:
+        return Response({'error': '등록된 이력서가 없습니다.'}, status=404)
+    except Exception as e:
+        return Response({'error': str(e)}, status=500)

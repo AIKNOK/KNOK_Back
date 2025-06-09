@@ -1,4 +1,5 @@
 from django.urls import path
+from .views import save_transcribed_text
 from .views import (
     signup,
     confirm_email,
@@ -31,7 +32,7 @@ urlpatterns = [
     path('posture/', receive_posture_count, name='posture'),
     path('analyze-voice/', analyze_voice_api, name='analyze_voice'),
     path('audio/upload/', AudioUploadView.as_view(), name='upload_audio_and_text'),
-
+    path("save_transcribed_text/", save_transcribed_text, name="save_transcribed_text"),
     # ❓ 꼬리 질문 여부 판단
     path('followup/check/', decide_followup_question, name='followup_check'),
 ]

@@ -2,14 +2,11 @@ from rest_framework.decorators import api_view
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
-from rest_framework import status
 from rest_framework.decorators import authentication_classes, permission_classes
 from pydub import AudioSegment
 from myapp.utils.keyword_extractor import extract_resume_keywords
 from myapp.utils.followup_logic import should_generate_followup
 from myapp.utils.token_utils import decode_cognito_id_token
-from datetime import datetime
-from threading import Thread
 
 import json
 import boto3
@@ -28,7 +25,6 @@ from django.conf import settings
 from .models import Resume
 from .serializers import ResumeSerializer
 from django.http import JsonResponse
-from pathlib import Path
 
 # 🔐 SECRET_HASH 계산 함수 (Cognito)
 def get_secret_hash(username):
@@ -91,6 +87,8 @@ def confirm_email(request):
 # 🔑 로그인 API
 @api_view(['POST'])
 def login(request):
+    print("📦 login 요청 데이터:", request.data)
+
     email = request.data.get('email')
     password = request.data.get('password')
 
@@ -106,6 +104,7 @@ def login(request):
                 'SECRET_HASH': get_secret_hash(email)
             }
         )
+
         auth_result = response['AuthenticationResult']
         id_token = auth_result['IdToken']
         access_token = auth_result['AccessToken']
@@ -116,10 +115,26 @@ def login(request):
             'access_token': access_token
         })
 
-    except client.exceptions.NotAuthorizedException:
+    except client.exceptions.NotAuthorizedException as e:
+        print("❌ NotAuthorizedException:", str(e))
         return Response({'error': '아이디 또는 비밀번호 오류'}, status=400)
+
+    except client.exceptions.UserNotConfirmedException as e:
+        print("❌ UserNotConfirmedException:", str(e))
+        return Response({'error': '이메일 인증이 필요합니다.'}, status=403)
+
+    except client.exceptions.InvalidParameterException as e:
+        print("❌ InvalidParameterException:", str(e))
+        return Response({'error': '파라미터 오류. 설정 확인 필요.'}, status=400)
+
+    except client.exceptions.SecretHashMismatchException as e:
+        print("❌ SecretHashMismatchException:", str(e))
+        return Response({'error': '시크릿 해시 오류. .env 또는 settings.py 확인 필요'}, status=400)
+
     except Exception as e:
+        print("❌ Unknown error:", str(e))
         return Response({'error': str(e)}, status=400)
+    
 
 # 🚪 로그아웃 API
 @api_view(['POST'])
@@ -369,68 +384,6 @@ def upload_merged_audio_to_s3(file_path, bucket, key):
                       region_name=settings.AWS_S3_REGION_NAME)
     s3.upload_file(file_path, bucket, key)
 
-# wav 파일 트랜스크라이브 -> 텍스트
-def transcribe_and_upload(bucket, audio_key, text_key):
-    import requests, time, uuid, logging
-    import boto3
-    from django.conf import settings
-
-    try:
-        transcribe = boto3.client('transcribe', region_name='us-east-1')
-        job_name = f"job-{uuid.uuid4()}"
-        job_uri = f"https://{bucket}.s3.us-east-1.amazonaws.com/{audio_key}"
-
-        print(f"🟡 [Start] Transcribe 시작")
-
-        start_time = time.time()
-
-        transcribe.start_transcription_job(
-            TranscriptionJobName=job_name,
-            Media={'MediaFileUri': job_uri},
-            MediaFormat='wav',
-            LanguageCode='ko-KR'
-        )
-
-        while True:
-            result = transcribe.get_transcription_job(TranscriptionJobName=job_name)
-            status = result['TranscriptionJob']['TranscriptionJobStatus']
-            if status in ['COMPLETED', 'FAILED']:
-                break
-            time.sleep(2)
-
-        elapsed = time.time() - start_time
-
-        if status == 'COMPLETED':
-            transcript_url = result['TranscriptionJob']['Transcript']['TranscriptFileUri']
-            print(f"✅ [Success] Transcribe 완료 - URL: {transcript_url}")
-            response = requests.get(transcript_url)
-            transcript_json = response.json()
-
-            # 텍스트 추출
-            transcript = transcript_json['results'].get('transcripts', [{}])[0].get('transcript', '')
-
-            print(f"📝 추출된 텍스트: {transcript}")
-            print(f"⏱️ 소요 시간: {elapsed:.2f}초")
-
-            # 텍스트를 S3에 저장
-            s3 = boto3.client('s3',
-                aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
-                aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
-                region_name=settings.AWS_S3_REGION_NAME
-            )
-            s3.put_object(
-                Bucket=bucket,
-                Key=text_key,
-                Body=transcript.encode("utf-8"),
-                ContentType="text/plain"
-            )
-            print(f"📤 S3 텍스트 업로드 성공: {text_key}")
-        else:
-            print(f"❌ [Fail] Transcribe 실패: {job_name}, 소요 시간: {elapsed:.2f}초")
-
-    except Exception as e:
-        print("🔥 [Error] 예외 발생:", str(e))
-
 # ✅ 3. 침묵 비율 분석 (librosa 사용)
 def analyze_silence_ratio(file_path):
     y, sr = librosa.load(file_path)
@@ -536,11 +489,11 @@ def analyze_voice_api(request):
         # ✅ Transcribe 분석 (STT 텍스트 추출)
         s3_key = "merged/merged_audio.wav"
         upload_merged_audio_to_s3(merged_audio_path, bucket, s3_key)
-        transcribe_text = transcribe_and_upload(bucket, s3_key)
+        #transcribe_text = transcribe_and_upload(bucket, s3_key)
 
         # 2. 분석 시작
         pitch_result = analyze_pitch(merged_audio_path)
-        speech_rate = analyze_speech_rate_via_transcribe(transcribe_text, merged_audio_path)
+        speech_rate = analyze_speech_rate_via_transcribe(merged_audio_path)
         silence_ratio = analyze_silence_ratio(merged_audio_path)
         emotion = analyze_emotion(merged_audio_path)
 
@@ -550,7 +503,6 @@ def analyze_voice_api(request):
             'silence_ratio': silence_ratio,
             'emotion': emotion,
             'posture_count': posture_count,
-            'transcribe_text' : transcribe_text
         }
 
         prompt = create_prompt(result)
@@ -656,42 +608,28 @@ def get_claude_followup_question(prompt):
 
 
 class AudioUploadView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated]  # JWT 인증
 
     def post(self, request):
-        uploaded_file = request.FILES.get("audio")
-        email = request.data.get("email")
-        question_id = request.data.get("question_id")
+        email = request.data.get('email')
+        question_id = request.data.get('question_id')
+        transcript = request.data.get('transcript')
 
-        if not uploaded_file or email is None or question_id is None:
-            return Response({"error": "필수 값 누락"}, status=400)
+        # DB 저장 또는 파일로 저장
+        print(f"[{email}] - 질문 {question_id}의 답변 전사 결과:")
+        print(transcript)
 
-        email_prefix = email.split('@')[0]
-        timestamp = datetime.now().strftime('%Y%m%d%H%M%S')
+        return Response({"message": "저장 완료!"})
 
-        s3 = boto3.client('s3',
-            aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
-            aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
-            region_name=settings.AWS_S3_REGION_NAME
-        )
+@api_view(['POST'])
+def save_transcribed_text(request):
+    email = request.data.get("email")
+    question_id = request.data.get("question_id")
+    transcript = request.data.get("transcript")
 
-        audio_key = f"audio/{email_prefix}/wavs/question_{question_id}_{timestamp}.wav"
-        text_key = f"audio/{email_prefix}/text/question_{question_id}_{timestamp}.txt"
+    print("📨 Django 수신됨:")
+    print("  - Email:", email)
+    print("  - Question ID:", question_id)
+    print("  - Transcript:", transcript[:100])  # 너무 길면 일부만 출력
 
-        # 1) S3에 음성 저장
-        s3.upload_fileobj(
-            uploaded_file,
-            settings.AWS_AUDIO_BUCKET_NAME,
-            audio_key,
-            ExtraArgs={"ContentType": "audio/wav"}
-        )
-
-        # 2) Transcribe 백그라운드 처리
-        Thread(target=transcribe_and_upload, args=(settings.AWS_AUDIO_BUCKET_NAME, audio_key, text_key)).start()
-
-        # 3) 즉시 응답
-        return Response({
-            "message": "음성 저장 완료 (텍스트는 잠시 후 생성됩니다)",
-            "audio_path": audio_key,
-            "text_path": text_key  # 프론트에서 polling 또는 WebSocket으로 텍스트 도착 확인 가능
-        })
+    return Response({"message": "저장 성공"})

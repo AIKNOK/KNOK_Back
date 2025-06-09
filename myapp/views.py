@@ -644,15 +644,12 @@ def save_transcribed_text(request):
     print("  - Question ID:", question_id)
     print("  - Transcript:", transcript[:100])  # 너무 길면 일부만 출력
 
-
-    return Response({"message": "저장 성공"})
-
-        # 3) 즉시 응답
-        return Response({
-            "message": "음성 저장 완료 (텍스트는 잠시 후 생성됩니다)",
-            "audio_path": audio_key,
-            "text_path": text_key  # 프론트에서 polling 또는 WebSocket으로 텍스트 도착 확인 가능
-        })
+    # 3) 즉시 응답
+    return Response({
+        "message": "음성 저장 완료 (텍스트는 잠시 후 생성됩니다)",
+        "audio_path": request.data.get("audio_path"),
+        "text_path": request.data.get("text_path")
+    })
 
 # 이력서를 불러와 텍스트 내용 추출 후 프론트엔드에 반환
 @api_view(['GET'])

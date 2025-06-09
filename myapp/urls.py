@@ -13,6 +13,7 @@ from .views import (
     receive_posture_count,
     decide_followup_question,
     AudioUploadView,
+    get_resume_text,
 )
 
 urlpatterns = [
@@ -27,12 +28,20 @@ urlpatterns = [
     path('resume/delete/', ResumeDeleteView.as_view(), name='resume_delete'),
     path('resume/', get_resume_view, name='resume_get'),
     path('generate-resume-questions/', generate_resume_questions, name='generate_resume_questions'),
+    path('get-resume-text/', get_resume_text, name='get_resume_text'),
+
 
     # 🎤 면접 관련 (자세, 음성 분석, STT 저장)
     path('posture/', receive_posture_count, name='posture'),
     path('analyze-voice/', analyze_voice_api, name='analyze_voice'),
     path('audio/upload/', AudioUploadView.as_view(), name='upload_audio_and_text'),
     path("save_transcribed_text/", save_transcribed_text, name="save_transcribed_text"),
+
+
+    # ✅ 추가: 프론트에서 요청하는 경로에 맞춤
+    path('interview/feedback/generate/', analyze_voice_api, name='generate_feedback'),
+    
+
     # ❓ 꼬리 질문 여부 판단
     path('followup/check/', decide_followup_question, name='followup_check'),
 ]

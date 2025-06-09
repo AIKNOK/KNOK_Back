@@ -4,7 +4,6 @@ from fastapi import FastAPI, WebSocket, Query
 from fastapi.middleware.cors import CORSMiddleware
 from datetime import datetime
 from amazon_transcribe.client import TranscribeStreamingClient
-from amazon_transcribe.model import AudioEvent
 from amazon_transcribe.handlers import TranscriptResultStreamHandler
 from starlette.websockets import WebSocketDisconnect
 import boto3
@@ -24,7 +23,7 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], all
 @app.websocket("/ws/transcribe")
 async def transcribe_ws(websocket: WebSocket, email: str = Query(...), question_id: str = Query(...), token: str = Query(...)):
     await websocket.accept()
-    print(f"🎤 WebSocket 연결됨 - 사용자: {email}, 질문 ID: {question_id}")
+    print(f"WebSocket 연결됨 - 사용자: {email}, 질문 ID: {question_id}")
 
     audio_buffer = bytearray()
     transcript_text = ""
@@ -41,74 +40,78 @@ async def transcribe_ws(websocket: WebSocket, email: str = Query(...), question_
         await websocket.close()
         return
 
+
     async def send_audio():
         try:
             while True:
                 try:
                     data = await asyncio.wait_for(websocket.receive_bytes(), timeout=90)
                 except asyncio.TimeoutError:
-                    print("🕒 오디오 수신 없음 - 타임아웃 종료")
-                    await stream.input_stream.end_stream()
+                    print("오디오 수신 없음 - 타임아웃 종료")
                     break
 
                 if data == b"END":
-                    print("🔴 클라이언트 END 신호 수신")
-                    await stream.input_stream.end_stream()
+                    print("클라이언트 END 신호 수신")
                     break
 
-                print(f"📥 오디오 수신됨")
+                print(f"오디오 수신됨: {len(data)} bytes")
                 audio_buffer.extend(data)
-                await stream.input_stream.send_audio_event(AudioEvent(audio_chunk=data))
 
+                try:
+                    # 메모리뷰/문자열 방어 코드
+                    if isinstance(data, memoryview):
+                        data = data.tobytes()
+                    elif isinstance(data, str):
+                        data = data.encode("utf-8")
+                    elif not isinstance(data, (bytes, bytearray)):
+                        data = bytes(data)
+
+                    await stream.input_stream.send_audio_event(data)  # ✅ AudioEvent 제거됨
+
+                except Exception as e:
+                    print("❌ 오디오 전송 실패:", e)
+                    break
         except WebSocketDisconnect:
-            print("🔌 WebSocket 연결 끊기")
-            await stream.input_stream.end_stream()
+            print("WebSocket 연결 끊김")
         except Exception as e:
-            print("❗ 오디오 전송 예제 발생:", e)
+            print("❗ send_audio 예외 발생:", e)
+        finally:
             await stream.input_stream.end_stream()
+            print("오디오 전송 종료 및 Transcribe 종료 요청")
 
     async def handle_transcription():
         nonlocal transcript_text
-        handler = TranscriptResultStreamHandler(stream.output_stream)
         try:
-            async for event in handler.handle_events():
+            async for event in stream.output_stream:
+                print("Transcribe 이벤트 수신됨")
                 for result in event.transcript.results:
                     if not result.is_partial:
                         text = result.alternatives[0].transcript
                         transcript_text += text + "\n"
                         await websocket.send_text(json.dumps({"transcript": text}))
         except Exception as e:
-            print("❗ 전사 핸들링 예제:", e)
+            print("❗ 전사 핸들링 예외:", e)
+        finally:
+            print("Transcribe 결과 수신 종료됨")
 
     try:
-        print("🔹 asyncio.gather 실행")
+        print("asyncio.gather 실행")
         await asyncio.gather(send_audio(), handle_transcription())
     except Exception as e:
         print("🔥 전사 실패:", e)
-
     finally:
         print("✅ WebSocket STT 완료")
-
         try:
             save_audio_to_s3(audio_buffer, email)
-        except Exception as e:
-            print("❌ 음성 S3 저장 실패:", e)
-
-        try:
             save_transcript_to_s3(transcript_text, email)
-        except Exception as e:
-            print("❌ 텍스트 S3 저장 실패:", e)
-
-        try:
             send_transcript_to_django(email, question_id, transcript_text, token)
         except Exception as e:
-            print("🔥 Django 전송 실패:", e)
-
-    try:
-        await websocket.send_text(json.dumps({"status": "done"}))
-        await websocket.close()
-    except Exception as e:
-        print("❌ WebSocket 닫기 실패:", e)
+            print("❌ 후처리 실패:", e)
+        try:
+            await websocket.send_text(json.dumps({"status": "done"}))
+            await websocket.close()
+        except Exception as e:
+            print("❌ WebSocket 닫기 실패:", e)
 
 
 def save_audio_to_s3(audio_bytes, email):

@@ -20,11 +20,18 @@ import numpy as np
 import parselmouth
 import time
 import PyPDF2
+import moviepy.editor as mp
+import subprocess
 
 from django.conf import settings
 from .models import Resume
 from .serializers import ResumeSerializer
 from django.http import JsonResponse
+from pathlib import Path
+from django.views.decorators.csrf import csrf_exempt
+from django.utils.decorators import method_decorator
+
+
 
 # 🔐 SECRET_HASH 계산 함수 (Cognito)
 def get_secret_hash(username):
@@ -280,9 +287,15 @@ def generate_resume_questions(request):
 
     위 이력서를 바탕으로 면접 질문 3개를 만들어주세요.
     형식은 아래와 같이 해주세요:
-    질문1: ...
-    질문2: ...
-    질문3: ...
+
+    - 질문 앞에 숫자나 '질문 1)', '1.', 'Q1' 등의 접두어는 절대 붙이지 마세요.
+    - 그냥 질문 내용만 문장 형태로 자연스럽게 출력해주세요.
+    - 줄바꿈으로 구분해 주세요.
+
+    예시 출력 형식:
+    지원하신 직무와 관련해 가장 자신 있는 기술 스택은 무엇인가요?
+    해당 기술을 활용해 문제를 해결했던 경험을 말씀해 주세요.
+    팀 프로젝트에서 본인이 맡았던 역할과 해결한 기술적 문제는 무엇이었나요?
     """
 
     # Claude 호출
@@ -694,4 +707,120 @@ def get_resume_text(request):
         return Response({'error': '등록된 이력서가 없습니다.'}, status=404)
     except Exception as e:
         return Response({'error': str(e)}, status=500)
+
+class FullVideoUploadView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        uploaded_video = request.FILES.get("video")
+        video_id = request.data.get("videoId")
+
+        if not uploaded_video or not video_id:
+            return Response({"error": "필수 값 누락"}, status=400)
+
+        email_prefix = request.user.email.split('@')[0]
+        key = f"videos/{email_prefix}/{video_id}.webm"
+
+        s3 = boto3.client(
+            's3',
+            aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
+            aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
+            region_name=settings.AWS_S3_REGION_NAME
+        )
+
+        try:
+            s3.upload_fileobj(
+                uploaded_video,
+                settings.AWS_FULL_VIDEO_BUCKET_NAME,
+                key,
+                ExtraArgs={"ContentType": "video/webm"}
+            )
+            return Response({
+                "message": "전체 영상 업로드 완료",
+                "video_path": key
+            })
+        except Exception as e:
+            return Response({"error": str(e)}, status=500)
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def extract_bad_posture_clips(request):
+    import requests
+
+    try:
+        video_id = request.data.get("videoId")
+        if not video_id:
+            return Response({"error": "videoId는 필수입니다."}, status=400)
+
+        email_prefix = request.user.email.split('@')[0]
+        video_key = f"videos/{email_prefix}/{video_id}.webm"
+
+        print("[🔍 segments 수신 내용]", request.data.get("segments"))
+
+        # 자세 구간 받아오기 (segments)
+        posture_data = request.data.get("segments")
+        if not posture_data:
+            return Response({"error": "segments가 없습니다."}, status=400)
+
+        # 전체 영상 다운로드 (임시 저장)
+        s3 = boto3.client("s3", aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
+                                   aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
+                                   region_name=settings.AWS_S3_REGION_NAME)
+        full_video_temp = tempfile.NamedTemporaryFile(delete=False, suffix=".webm")
+        s3.download_fileobj(settings.AWS_FULL_VIDEO_BUCKET_NAME, video_key, full_video_temp)
+        full_video_temp.close()
+
+        # MoviePy로 클립 추출
+        converted_video_path = convert_webm_to_mp4(full_video_temp.name)
+        video = mp.VideoFileClip(converted_video_path)
+        clip_urls = []
+
+        for idx, segment in enumerate(posture_data):
+            try:
+                start = float(segment["start"])
+                end = float(segment["end"])
+            except Exception as e:
+                return Response({"error": f"start/end 변환 실패: {str(e)}"}, status=400)
+
+            clip = video.subclip(start, end)
+            clip_path = tempfile.NamedTemporaryFile(delete=False, suffix=".mp4").name
+            clip.write_videofile(clip_path, codec="libx264", audio_codec="aac", logger=None)
+
+            clip_s3_key = f"clips/{email_prefix}/{video_id}_clip_{idx+1}.mp4"
+
+            s3.upload_file(
+                clip_path,
+                settings.AWS_CLIP_VIDEO_BUCKET_NAME,
+                clip_s3_key,
+                ExtraArgs={"ContentType": "video/mp4"}
+            )
+
+            clip_url = f"https://{settings.AWS_CLIP_VIDEO_BUCKET_NAME}.s3.{settings.AWS_S3_REGION_NAME}.amazonaws.com/{clip_s3_key}"
+            clip_urls.append(clip_url)
+
+        return Response({
+            "message": "클립 저장 완료",
+            "clips": clip_urls
+        })
+
+    except Exception as e:
+        import traceback
+        traceback_str = traceback.format_exc()
+        print("🔥 클립 추출 중 예외 발생:\n", traceback_str)
+        return Response({"error": str(e)}, status=500)
+
+def convert_webm_to_mp4(input_path):
+    output_path = tempfile.NamedTemporaryFile(delete=False, suffix=".mp4").name
+    command = [
+        "ffmpeg",
+        "-y",
+        "-i", input_path,
+        "-c:v", "libx264",
+        "-preset", "fast",
+        "-crf", "23",
+        "-c:a", "aac",
+        output_path
+    ]
+    subprocess.run(command, check=True)
+    return output_path
 

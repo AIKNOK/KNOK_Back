@@ -506,7 +506,7 @@ def analyze_voice_api(request):
         # ✅ Transcribe 분석 (STT 텍스트 추출)
         s3_key = "merged/merged_audio.wav"
         upload_merged_audio_to_s3(merged_audio_path, bucket, s3_key)
-        transcribe_text = transcribe_and_upload(bucket, s3_key)
+        transcribe_text = merge_texts_from_s3_folder(email_prefix, upload_id, bucket)
 
         # 2. 분석 시작
         pitch_result = analyze_pitch(merged_audio_path)
@@ -831,3 +831,28 @@ def convert_webm_to_mp4(input_path):
     subprocess.run(command, check=True)
     return output_path
 
+def merge_texts_from_s3_folder(email_prefix, upload_id, bucket_name):
+    import boto3
+    
+    bucket_name = settings.AWS_AUDIO_BUCKET_NAME
+
+    prefix = f"{email_prefix}/{upload_id}/text/"
+    s3 = boto3.client('s3')
+
+    response = s3.list_objects_v2(Bucket=bucket_name, Prefix=prefix)
+    if 'Contents' not in response:
+        return ""
+
+    txt_keys = [
+        obj['Key']
+        for obj in response['Contents']
+        if obj['Key'].endswith(".txt")
+    ]
+
+    merged_text = ""
+    for key in sorted(txt_keys):
+        obj = s3.get_object(Bucket=bucket_name, Key=key)
+        content = obj['Body'].read().decode('utf-8')
+        merged_text += content.strip() + "\n\n"
+
+    return merged_text.strip()

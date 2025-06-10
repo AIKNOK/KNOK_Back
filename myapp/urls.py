@@ -13,6 +13,8 @@ from .views import (
     decide_followup_question,
     AudioUploadView,
     get_resume_text,
+    FullVideoUploadView,
+    extract_bad_posture_clips,
 )
 
 urlpatterns = [
@@ -32,8 +34,11 @@ urlpatterns = [
 
     # 🎤 면접 관련 (자세, 음성 분석, STT 저장)
     path('posture/', receive_posture_count, name='posture'),
+    path('posture/segments', receive_posture_count),
     path('analyze-voice/', analyze_voice_api, name='analyze_voice'),
     path('audio/upload/', AudioUploadView.as_view(), name='upload_audio_and_text'),
+    path('video/upload/', FullVideoUploadView.as_view(), name='upload-full-video'),
+    path("video/extract-clips/", extract_bad_posture_clips),
 
     # ✅ 추가: 프론트에서 요청하는 경로에 맞춤
     path('interview/feedback/generate/', analyze_voice_api, name='generate_feedback'),

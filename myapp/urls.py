@@ -1,4 +1,5 @@
 from django.urls import path
+from .views import save_transcribed_text
 from .views import (
     signup,
     confirm_email,
@@ -39,10 +40,14 @@ urlpatterns = [
     path('audio/upload/', AudioUploadView.as_view(), name='upload_audio_and_text'),
     path('video/upload/', FullVideoUploadView.as_view(), name='upload-full-video'),
     path("video/extract-clips/", extract_bad_posture_clips),
+    path("save_transcribed_text/", save_transcribed_text, name="save_transcribed_text"),
+
+
 
     # ✅ 추가: 프론트에서 요청하는 경로에 맞춤
     path('interview/feedback/generate/', analyze_voice_api, name='generate_feedback'),
     
+
     # ❓ 꼬리 질문 여부 판단
     path('followup/check/', decide_followup_question, name='followup_check'),
 ]

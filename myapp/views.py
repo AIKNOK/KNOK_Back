@@ -30,7 +30,7 @@ from django.http import JsonResponse
 from pathlib import Path
 from django.views.decorators.csrf import csrf_exempt
 from django.utils.decorators import method_decorator
-
+from datetime import datetime
 
 
 # 🔐 SECRET_HASH 계산 함수 (Cognito)
@@ -506,7 +506,7 @@ def analyze_voice_api(request):
         # ✅ Transcribe 분석 (STT 텍스트 추출)
         s3_key = "merged/merged_audio.wav"
         upload_merged_audio_to_s3(merged_audio_path, bucket, s3_key)
-        #transcribe_text = transcribe_and_upload(bucket, s3_key)
+        transcribe_text = transcribe_and_upload(bucket, s3_key)
 
         # 2. 분석 시작
         pitch_result = analyze_pitch(merged_audio_path)
@@ -770,6 +770,13 @@ def extract_bad_posture_clips(request):
         s3.download_fileobj(settings.AWS_FULL_VIDEO_BUCKET_NAME, video_key, full_video_temp)
         full_video_temp.close()
 
+        today_str = datetime.now().strftime("%m%d")
+
+        base_clip_prefix = f"clips/{email_prefix}/"
+        response = s3.list_objects_v2(Bucket=settings.AWS_CLIP_VIDEO_BUCKET_NAME, Prefix=base_clip_prefix)
+        count = sum(1 for obj in response.get('Contents', []) if today_str in obj['Key'])
+        upload_id = f"{today_str}-{count + 1}"  
+
         # MoviePy로 클립 추출
         converted_video_path = convert_webm_to_mp4(full_video_temp.name)
         video = mp.VideoFileClip(converted_video_path)
@@ -786,7 +793,7 @@ def extract_bad_posture_clips(request):
             clip_path = tempfile.NamedTemporaryFile(delete=False, suffix=".mp4").name
             clip.write_videofile(clip_path, codec="libx264", audio_codec="aac", logger=None)
 
-            clip_s3_key = f"clips/{email_prefix}/{video_id}_clip_{idx+1}.mp4"
+            clip_s3_key = f"clips/{email_prefix}/{upload_id}/{video_id}_clip_{idx+1}.mp4"
 
             s3.upload_file(
                 clip_path,

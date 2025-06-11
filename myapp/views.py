@@ -608,6 +608,7 @@ follow-up 질문:"""
 
 
 
+
 def get_claude_followup_question(prompt):
 
     client = boto3.client("bedrock-runtime", region_name="us-east-1")
@@ -889,6 +890,7 @@ def get_all_questions_view(request):
     ))
 
     return Response({"questions": sorted_merged})
+  
 # TTS 음성파일 가져오기
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
@@ -940,3 +942,4 @@ def get_ordered_question_audio(request):
     results = list(filter(None, parsed))
     results = sorted(results, key=lambda x: x["order"])
     return Response(results)
+

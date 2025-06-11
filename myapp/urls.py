@@ -35,7 +35,7 @@ urlpatterns = [
     path('get-resume-text/', get_resume_text, name='get_resume_text'),
     path('get_all_questions', get_all_questions_view, name='get_all_questions'),
 
-    # 🎤 면접 관련 (자세, 음성 분석, STT 저장,TTS)
+    # 🎤 면접 관련 (자세, 음성 분석, STT 저장)
     path('posture/', receive_posture_count, name='posture'),
     path('posture/segments', receive_posture_count),
     path('analyze-voice/', analyze_voice_api, name='analyze_voice'),

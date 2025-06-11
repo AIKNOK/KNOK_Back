@@ -34,7 +34,8 @@ from pathlib import Path
 from django.views.decorators.csrf import csrf_exempt
 from django.utils.decorators import method_decorator
 from datetime import datetime
-
+from reportlab.pdfgen import canvas  # or your preferred PDF lib
+from reportlab.lib.pagesizes import A4
 
 # 🔐 SECRET_HASH 계산 함수 (Cognito)
 def get_secret_hash(username):
@@ -750,76 +751,92 @@ class FullVideoUploadView(APIView):
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def extract_bad_posture_clips(request):
-    import requests
-
+    import traceback
     try:
         video_id = request.data.get("videoId")
-        if not video_id:
-            return Response({"error": "videoId는 필수입니다."}, status=400)
+        segments = request.data.get("segments")
+        feedback_text = request.data.get("feedback_text", "면접 분석 피드백 PDF 예시입니다.")  # 프론트에서 분석문 전달하면 여기에
+        if not video_id or not segments:
+            return Response({"error": "videoId, segments 필수"}, status=400)
 
         email_prefix = request.user.email.split('@')[0]
         video_key = f"videos/{email_prefix}/{video_id}.webm"
 
-        print("[🔍 segments 수신 내용]", request.data.get("segments"))
-
-        # 자세 구간 받아오기 (segments)
-        posture_data = request.data.get("segments")
-        if not posture_data:
-            return Response({"error": "segments가 없습니다."}, status=400)
-
-        # 전체 영상 다운로드 (임시 저장)
-        s3 = boto3.client("s3", aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
-                                   aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
-                                   region_name=settings.AWS_S3_REGION_NAME)
+        # S3에서 전체 영상 다운로드
+        s3 = boto3.client(
+            "s3",
+            aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
+            aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
+            region_name=settings.AWS_S3_REGION_NAME
+        )
         full_video_temp = tempfile.NamedTemporaryFile(delete=False, suffix=".webm")
         s3.download_fileobj(settings.AWS_FULL_VIDEO_BUCKET_NAME, video_key, full_video_temp)
         full_video_temp.close()
 
-        today_str = datetime.now().strftime("%m%d")
-
-        base_clip_prefix = f"clips/{email_prefix}/"
-        response = s3.list_objects_v2(Bucket=settings.AWS_CLIP_VIDEO_BUCKET_NAME, Prefix=base_clip_prefix)
-        count = sum(1 for obj in response.get('Contents', []) if today_str in obj['Key'])
-        upload_id = f"{today_str}-{count + 1}"  
-
-        # MoviePy로 클립 추출
+        # webm → mp4 변환 (MoviePy 지원용)
         converted_video_path = convert_webm_to_mp4(full_video_temp.name)
         video = mp.VideoFileClip(converted_video_path)
-        clip_urls = []
 
-        for idx, segment in enumerate(posture_data):
-            try:
-                start = float(segment["start"])
-                end = float(segment["end"])
-            except Exception as e:
-                return Response({"error": f"start/end 변환 실패: {str(e)}"}, status=400)
-
+        # 1) 클립 추출 및 임시파일 저장
+        clip_file_paths = []
+        for idx, segment in enumerate(segments):
+            start = float(segment["start"])
+            end = float(segment["end"])
             clip = video.subclip(start, end)
-            clip_path = tempfile.NamedTemporaryFile(delete=False, suffix=".mp4").name
+            clip_path = tempfile.NamedTemporaryFile(delete=False, suffix=f"_clip_{idx+1}.mp4").name
             clip.write_videofile(clip_path, codec="libx264", audio_codec="aac", logger=None)
+            clip_file_paths.append(clip_path)
 
-            clip_s3_key = f"clips/{email_prefix}/{upload_id}/{video_id}_clip_{idx+1}.mp4"
+        # 2) PDF 생성
+        pdf_bytes = io.BytesIO()
+        c = canvas.Canvas(pdf_bytes, pagesize=A4)
+        c.setFont("Helvetica-Bold", 16)
+        c.drawString(100, 800, "면접 피드백 리포트")
+        c.setFont("Helvetica", 12)
+        c.drawString(100, 780, f"Video ID: {video_id}")
+        c.drawString(100, 760, f"클립 수: {len(clip_file_paths)}")
+        # 여러 줄 피드백 표시 (간단한 예시)
+        for i, line in enumerate(feedback_text.split("\n")):
+            c.drawString(100, 730 - i*18, line)
+        c.save()
+        pdf_bytes.seek(0)
 
-            s3.upload_file(
-                clip_path,
-                settings.AWS_CLIP_VIDEO_BUCKET_NAME,
-                clip_s3_key,
-                ExtraArgs={"ContentType": "video/mp4"}
-            )
+        # 3) ZIP 버퍼에 PDF + 클립 묶기
+        zip_buffer = io.BytesIO()
+        with zipfile.ZipFile(zip_buffer, 'w') as zf:
+            # PDF 추가
+            zf.writestr("interview-feedback.pdf", pdf_bytes.read())
+            # 클립들 추가
+            for path in clip_file_paths:
+                zf.write(path, arcname=Path(path).name)
+        zip_buffer.seek(0)
 
-            clip_url = f"https://{settings.AWS_CLIP_VIDEO_BUCKET_NAME}.s3.{settings.AWS_S3_REGION_NAME}.amazonaws.com/{clip_s3_key}"
-            clip_urls.append(clip_url)
-
-        return Response({
-            "message": "클립 저장 완료",
-            "clips": clip_urls
-        })
+        # 4) FileResponse로 zip 다운로드
+        response = FileResponse(
+            zip_buffer,
+            as_attachment=True,
+            filename=f"{video_id}_feedback.zip"
+        )
+        return response
 
     except Exception as e:
-        import traceback
-        traceback_str = traceback.format_exc()
-        print("🔥 클립 추출 중 예외 발생:\n", traceback_str)
+        print("🔥 클립 zip 추출 예외:", traceback.format_exc())
         return Response({"error": str(e)}, status=500)
+
+def convert_webm_to_mp4(input_path):
+    output_path = tempfile.NamedTemporaryFile(delete=False, suffix=".mp4").name
+    command = [
+        "ffmpeg",
+        "-y",
+        "-i", input_path,
+        "-c:v", "libx264",
+        "-preset", "fast",
+        "-crf", "23",
+        "-c:a", "aac",
+        output_path
+    ]
+    subprocess.run(command, check=True)
+    return output_path
 
 def convert_webm_to_mp4(input_path):
     output_path = tempfile.NamedTemporaryFile(delete=False, suffix=".mp4").name

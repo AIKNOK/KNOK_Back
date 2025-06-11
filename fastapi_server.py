@@ -117,7 +117,7 @@ async def transcribe_ws(websocket: WebSocket, email: str = Query(...), question_
 def save_audio_to_s3(audio_bytes, email):
     email_prefix = email.split('@')[0]
     timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
-    key = f"audio/{email_prefix}/wavs/live_{timestamp}.wav"
+    key = f"{email_prefix}/wavs/live_{timestamp}.wav"
     print(f"🛠️ 저장할 S3 키: {key}")
 
     temp_wav = tempfile.NamedTemporaryFile(delete=False, suffix=".wav")
@@ -149,7 +149,7 @@ def save_audio_to_s3(audio_bytes, email):
 def save_transcript_to_s3(transcript_text, email):
     email_prefix = email.split('@')[0]
     timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
-    key = f"audio/{email_prefix}/text/live_{timestamp}.txt"
+    key = f"{email_prefix}/text/live_{timestamp}.txt"
 
     s3 = boto3.client('s3',
         aws_access_key_id=AWS_ACCESS_KEY,

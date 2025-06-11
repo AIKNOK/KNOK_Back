@@ -7,7 +7,10 @@ from pydub import AudioSegment
 from myapp.utils.keyword_extractor import extract_resume_keywords
 from myapp.utils.followup_logic import should_generate_followup
 from myapp.utils.token_utils import decode_cognito_id_token
+from urllib.parse import quote 
 
+
+import re
 import json
 import boto3
 import hmac
@@ -605,6 +608,7 @@ follow-up 질문:"""
 
 
 
+
 def get_claude_followup_question(prompt):
 
     client = boto3.client("bedrock-runtime", region_name="us-east-1")
@@ -886,3 +890,56 @@ def get_all_questions_view(request):
     ))
 
     return Response({"questions": sorted_merged})
+  
+# TTS 음성파일 가져오기
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def get_ordered_question_audio(request):
+    user = request.user
+    email_prefix = user.email.split('@')[0]
+    bucket = settings.AWS_TTS_BUCKET_NAME
+    prefix = f'tts_outputs/dlrjsgh8529/'
+    #
+    s3 = boto3.client(
+        's3',
+        aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
+        aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
+        region_name=settings.AWS_S3_REGION_NAME
+    )
+
+    response = s3.list_objects_v2(Bucket=bucket, Prefix=prefix)
+    if 'Contents' not in response:
+        print("⚠️ S3 목록이 비어있습니다.")
+        return Response([], status=200)
+
+    wav_files = [obj['Key'] for obj in response['Contents'] if obj['Key'].endswith('.wav')]
+    print("🔍 S3에서 찾은 wav 파일들:", wav_files)
+
+    def parse_question_info(key):
+        filename = key.split('/')[-1].replace('.wav', '').replace('질문 ', '')
+        match = re.match(r"^(\d+)(?:-(\d+))?$", filename)
+        if not match:
+            print(f"❌ 정규식 매칭 실패: {filename}")
+            return None
+        major = int(match.group(1))
+        minor = int(match.group(2)) if match.group(2) else 0
+        order = major + minor * 0.01
+        question_id = f"q{filename.replace('-', '_')}"
+        parent_id = f"q{major}" if minor else None
+        encoded_key = quote(key)
+        audio_url = f"https://{bucket}.s3.{settings.AWS_S3_REGION_NAME}.amazonaws.com/{encoded_key}"
+        print(f"✅ 파싱 성공: {question_id}, {audio_url}")
+        return {
+            "id": question_id,
+            "audio_url": audio_url,
+            "order": order,
+            "parent_id": parent_id
+        }
+
+    parsed = [parse_question_info(key) for key in wav_files]
+    print("🧾 파싱된 결과:", parsed)
+
+    results = list(filter(None, parsed))
+    results = sorted(results, key=lambda x: x["order"])
+    return Response(results)
+

@@ -33,7 +33,7 @@ from django.http import JsonResponse
 from pathlib import Path
 from django.views.decorators.csrf import csrf_exempt
 from django.utils.decorators import method_decorator
-
+from datetime import datetime
 
 
 # 🔐 SECRET_HASH 계산 함수 (Cognito)
@@ -509,7 +509,7 @@ def analyze_voice_api(request):
         # ✅ Transcribe 분석 (STT 텍스트 추출)
         s3_key = "merged/merged_audio.wav"
         upload_merged_audio_to_s3(merged_audio_path, bucket, s3_key)
-        #transcribe_text = transcribe_and_upload(bucket, s3_key)
+        transcribe_text = merge_texts_from_s3_folder(email_prefix, upload_id, bucket)
 
         # 2. 분석 시작
         pitch_result = analyze_pitch(merged_audio_path)
@@ -550,62 +550,63 @@ def receive_posture_count(request):
     print(f"[백엔드 수신] 자세 count: {count}")
     return Response({"message": "count 수신 완료", "count": count})
 
-@api_view(['POST'])
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
 def decide_followup_question(request):
-    # 🔐 ID 토큰에서 사용자 이메일 추출
-    auth_header = request.headers.get("Authorization", "")
-    if not auth_header.startswith("Bearer "):
-        return Response({"error": "Authorization 헤더가 없습니다."}, status=401)
+    data = request.data
+    email = request.user.email
+    question = data.get("question")
+    answer = data.get("answer")
+    existing_question_numbers = data.get("existing_question_numbers", [])  # e.g., ["1", "2", "2-1"]
+    base_question_number = data.get("base_question_number")  # e.g., "2"
 
-    id_token = auth_header.replace("Bearer ", "")
-    email = decode_cognito_id_token(id_token)
-    if not email:
-        return Response({"detail": "이메일이 토큰에 없습니다."}, status=403)
+    if not question or not answer or not base_question_number:
+        return Response({"error": "Missing required fields."}, status=400)
 
-    resume_text = request.data.get('resume_text')
-    user_answer = request.data.get('user_answer')
+    # Step 1: Claude로부터 꼬리질문 받아오기
+    prompt = f"""다음은 면접 질문과 그에 대한 지원자의 답변입니다. 이 답변을 기반으로 추가로 물어볼 만한 follow-up 질문 하나만 생성해주세요.
+질문: {question}
+답변: {answer}
+follow-up 질문:"""
+    followup = get_claude_followup_question(prompt)
 
-    if not resume_text or not user_answer:
-        return Response({'error': 'resume_text와 user_answer를 모두 포함해야 합니다.'}, status=400)
+    # Step 2: 꼬리질문 번호 자동 생성
+    def next_followup_number(existing_numbers, base_number):
+        suffixes = [
+            int(num.split("-")[1])
+            for num in existing_numbers
+            if num.startswith(f"{base_number}-") and "-" in num
+        ]
+        next_num = max(suffixes, default=0) + 1
+        return f"{base_number}-{next_num}"
 
-    keywords = extract_resume_keywords(resume_text)
-    print("📌 resume_text:\n", resume_text)
-    print("📌 user_answer:\n", user_answer)
-    print("📌 키워드:", keywords)
-    print("📌 매칭된 키워드:", [kw for kw in keywords if kw in user_answer])
-    print("📌 match_count:", sum(1 for kw in keywords if kw in user_answer))
+    new_number = next_followup_number(existing_question_numbers, base_question_number)
 
-    
-    is_followup = should_generate_followup(user_answer, keywords)
+    # Step 3: followup 질문 S3에 저장
+    followup_bucket = 'knok-followup-questions'
+    email_prefix = request.user.email.split('@')[0]
+    key = f"{email_prefix}/질문{new_number}.txt"
 
-    response_data = {
-        'followup': is_followup,
-        'matched_keywords': [kw for kw in keywords if kw in user_answer],
-        'all_keywords': keywords,
+    s3 = boto3.client('s3',
+        aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
+        aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
+        region_name=settings.AWS_S3_REGION_NAME
+    )
 
-    }
+    s3.put_object(
+        Bucket=followup_bucket,
+        Key=key,
+        Body=followup.encode('utf-8'),
+        ContentType='text/plain'
+    )
 
-    # ✅ followup이 True일 경우 Bedrock으로 질문 생성
-    if is_followup:
-        matched_keywords = [kw for kw in keywords if kw in user_answer]
+    # Step 4: 응답
+    return Response({
+        "number": new_number,
+        "text": followup
+    })
 
-        prompt = f"""
-        사용자가 자기소개서에서 다음과 같은 키워드를 강조했습니다: {', '.join(keywords)}.
-        이에 대해 사용자가 다음과 같은 답변을 했습니다: "{user_answer}".
-        답변에서 특히 다음 키워드가 매칭되었습니다: {', '.join(matched_keywords)}.
-        이 답변을 기반으로, 더 깊이 있는 질문 1개를 생성해주세요.
-        질문은 매칭된 키워드와 연관지어 질문을 해주세요.(예시 : ~라고 말씀하셨는데, ~을 언급하셨는데 등등)
-        다른 문장,기호,특수문자,강조표시를 포함하지 말고 실제 면접자에게 질문을 하는 문장만 포함하세요.
-        """
 
-        try:
-            question = get_claude_followup_question(prompt)
-            response_data['generated_question'] = question.strip()
-        except Exception as e:
-            response_data['generated_question'] = None
-            response_data['bedrock_error'] = str(e)
-
-    return Response(response_data)
 
 def get_claude_followup_question(prompt):
 
@@ -773,6 +774,13 @@ def extract_bad_posture_clips(request):
         s3.download_fileobj(settings.AWS_FULL_VIDEO_BUCKET_NAME, video_key, full_video_temp)
         full_video_temp.close()
 
+        today_str = datetime.now().strftime("%m%d")
+
+        base_clip_prefix = f"clips/{email_prefix}/"
+        response = s3.list_objects_v2(Bucket=settings.AWS_CLIP_VIDEO_BUCKET_NAME, Prefix=base_clip_prefix)
+        count = sum(1 for obj in response.get('Contents', []) if today_str in obj['Key'])
+        upload_id = f"{today_str}-{count + 1}"  
+
         # MoviePy로 클립 추출
         converted_video_path = convert_webm_to_mp4(full_video_temp.name)
         video = mp.VideoFileClip(converted_video_path)
@@ -789,7 +797,7 @@ def extract_bad_posture_clips(request):
             clip_path = tempfile.NamedTemporaryFile(delete=False, suffix=".mp4").name
             clip.write_videofile(clip_path, codec="libx264", audio_codec="aac", logger=None)
 
-            clip_s3_key = f"clips/{email_prefix}/{video_id}_clip_{idx+1}.mp4"
+            clip_s3_key = f"clips/{email_prefix}/{upload_id}/{video_id}_clip_{idx+1}.mp4"
 
             s3.upload_file(
                 clip_path,
@@ -827,6 +835,60 @@ def convert_webm_to_mp4(input_path):
     subprocess.run(command, check=True)
     return output_path
 
+def merge_texts_from_s3_folder(email_prefix, upload_id):
+    import boto3
+    
+    bucket_name = settings.AWS_AUDIO_BUCKET_NAME
+
+    prefix = f"{email_prefix}/{upload_id}/text/"
+    s3 = boto3.client('s3')
+
+    response = s3.list_objects_v2(Bucket=bucket_name, Prefix=prefix)
+    if 'Contents' not in response:
+        return ""
+
+    txt_keys = [
+        obj['Key']
+        for obj in response['Contents']
+        if obj['Key'].endswith(".txt")
+    ]
+
+    merged_text = ""
+    for key in sorted(txt_keys):
+        obj = s3.get_object(Bucket=bucket_name, Key=key)
+        content = obj['Body'].read().decode('utf-8')
+        merged_text += content.strip() + "\n\n"
+
+    return merged_text.strip()
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def get_all_questions_view(request):
+    email_prefix = request.user.email.split('@')[0]
+
+    def fetch_questions(bucket_name):
+        s3 = boto3.client('s3')
+        prefix = f"{email_prefix}/"
+        response = s3.list_objects_v2(Bucket=bucket_name, Prefix=prefix)
+        result = {}
+        for obj in response.get('Contents', []):
+            key = obj['Key']
+            if key.endswith('.txt'):
+                question_number = Path(key).stem.replace("질문", "")
+                content = s3.get_object(Bucket=bucket_name, Key=key)['Body'].read().decode('utf-8')
+                result[question_number] = content.strip()
+        return result
+
+    base_questions = fetch_questions('resume-questions')
+    followup_questions = fetch_questions('knok-followup-questions')
+
+    merged = {**base_questions, **followup_questions}
+    sorted_merged = dict(sorted(
+        merged.items(),
+        key=lambda x: [int(part) if part.isdigit() else part for part in x[0].split('-')]
+    ))
+
+    return Response({"questions": sorted_merged})
 # TTS 음성파일 가져오기
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])

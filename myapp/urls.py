@@ -17,6 +17,7 @@ from .views import (
     get_resume_text,
     FullVideoUploadView,
     extract_bad_posture_clips,
+    get_all_questions_view,
 )
 
 urlpatterns = [
@@ -32,7 +33,7 @@ urlpatterns = [
     path('resume/', get_resume_view, name='resume_get'),
     path('generate-resume-questions/', generate_resume_questions, name='generate_resume_questions'),
     path('get-resume-text/', get_resume_text, name='get_resume_text'),
-
+    path('get_all_questions', get_all_questions_view, name='get_all_questions'),
 
     # 🎤 면접 관련 (자세, 음성 분석, STT 저장,TTS)
     path('posture/', receive_posture_count, name='posture'),

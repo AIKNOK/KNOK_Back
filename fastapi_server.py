@@ -10,6 +10,7 @@ import boto3
 from dotenv import load_dotenv
 
 load_dotenv()
+upload_id_cache = {}
 
 REGION = os.getenv("AWS_REGION")
 S3_BUCKET = os.getenv("AWS_AUDIO_BUCKET_NAME")
@@ -96,14 +97,18 @@ async def transcribe_ws(websocket: WebSocket, email: str = Query(...), question_
 
     try:
         print("asyncio.gather 실행")
+        email_prefix = email.split('@')[0]
+        if email not in upload_id_cache:
+            upload_id_cache[email] = get_upload_id(email_prefix)
+        upload_id = upload_id_cache[email]
         await asyncio.gather(send_audio(), handle_transcription())
     except Exception as e:
         print("🔥 전사 실패:", e)
     finally:
         print("✅ WebSocket STT 완료")
         try:
-            save_audio_to_s3(audio_buffer, email)
-            save_transcript_to_s3(transcript_text, email)
+            save_audio_to_s3(audio_buffer, email, upload_id, question_id)
+            save_transcript_to_s3(transcript_text, email, upload_id, question_id)
             send_transcript_to_django(email, question_id, transcript_text, token)
         except Exception as e:
             print("❌ 후처리 실패:", e)
@@ -114,10 +119,14 @@ async def transcribe_ws(websocket: WebSocket, email: str = Query(...), question_
             print("❌ WebSocket 닫기 실패:", e)
 
 
-def save_audio_to_s3(audio_bytes, email):
+def save_audio_to_s3(audio_bytes, email, upload_id, question_id):
     email_prefix = email.split('@')[0]
+<<<<<<< HEAD
     timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
     key = f"{email_prefix}/wavs/live_{timestamp}.wav"
+=======
+    key = f"{email_prefix}/{upload_id}/wavs/live_q{question_id}.wav"
+>>>>>>> 4335c6dc78c22f96fe6c39fd2552ac89da37c46f
     print(f"🛠️ 저장할 S3 키: {key}")
 
     temp_wav = tempfile.NamedTemporaryFile(delete=False, suffix=".wav")
@@ -146,10 +155,14 @@ def save_audio_to_s3(audio_bytes, email):
             print("❌ 파일 삭제 실패:", e)
 
 
-def save_transcript_to_s3(transcript_text, email):
+def save_transcript_to_s3(transcript_text, email, upload_id, question_id):
     email_prefix = email.split('@')[0]
+<<<<<<< HEAD
     timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
     key = f"{email_prefix}/text/live_{timestamp}.txt"
+=======
+    key = f"{email_prefix}/{upload_id}/text/live_q{question_id}.txt"
+>>>>>>> 4335c6dc78c22f96fe6c39fd2552ac89da37c46f
 
     s3 = boto3.client('s3',
         aws_access_key_id=AWS_ACCESS_KEY,
@@ -182,3 +195,26 @@ def send_transcript_to_django(email, question_id, transcript_text, token):
         print("📨 Django 저장 응답:", response.status_code, response.text)
     except Exception as e:
         print("🔥 Django 저장 실패:", str(e))
+
+def get_upload_id(email_prefix):
+    s3 = boto3.client('s3',
+        aws_access_key_id=AWS_ACCESS_KEY,
+        aws_secret_access_key=AWS_SECRET_KEY,
+        region_name=REGION
+    )
+
+    today_str = datetime.now().strftime("%m%d")
+    prefix = f"{email_prefix}/{today_str}-"
+
+    response = s3.list_objects_v2(Bucket=S3_BUCKET, Prefix=prefix)
+    existing_ids = set()
+
+    for obj in response.get('Contents', []):
+        key = obj['Key']
+        # 예: 'kimxodud0823/0610-1/wavs/live_q1.wav' → '0610-1'
+        parts = key.split('/')
+        if len(parts) >= 2 and parts[1].startswith(today_str + '-'):
+            existing_ids.add(parts[1])
+
+    new_index = len(existing_ids) + 1
+    return f"{today_str}-{new_index}"

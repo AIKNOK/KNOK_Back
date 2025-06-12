@@ -17,6 +17,7 @@ from .views import (
     FullVideoUploadView,
     extract_bad_posture_clips,
     get_all_questions_view,
+    generate_feedback_report,
 )
 
 urlpatterns = [
@@ -45,9 +46,9 @@ urlpatterns = [
 
 
 
-    # ✅ 추가: 프론트에서 요청하는 경로에 맞춤
-    path('interview/feedback/generate/', analyze_voice_api, name='generate_feedback'),
     
+    # ✅ 추가: 프론트에서 요청하는 경로에 맞춤
+    path('interview/feedback/generate/', generate_feedback_report, name='generate_feedback'),
 
     # ❓ 꼬리 질문 여부 판단
     path('followup/check/', decide_followup_question, name='followup_check'),

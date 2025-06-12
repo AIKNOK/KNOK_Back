@@ -23,6 +23,7 @@ import PyPDF2
 import moviepy.editor as mp
 import subprocess
 
+
 from django.conf import settings
 from .models import Resume
 from .serializers import ResumeSerializer
@@ -30,7 +31,7 @@ from django.http import JsonResponse
 from pathlib import Path
 from django.views.decorators.csrf import csrf_exempt
 from django.utils.decorators import method_decorator
-from datetime import datetime
+
 
 
 # 🔐 SECRET_HASH 계산 함수 (Cognito)
@@ -432,48 +433,33 @@ def analyze_emotion(file_path):
         return "자신감 있음"
     else:
         return "긴장함"
-
-# 🧠 Claude 3에게 보낼 프롬프트 생성
-def create_prompt(analysis):
-    posture_count = analysis.get("posture_count", None)
-
-    # ✅ 자세 설명 프롬프트
-    posture_desc = f"면접 중 총 {posture_count}회의 자세 흔들림이 감지되었습니다. 이 수치를 바탕으로 면접 자세에 대한 피드백을 자연스럽게 작성해주세요."
-
-    # ✅ 음성 분석 설명
-    voice_desc = f"""
-- 목소리 떨림: {analysis['voice_tremor']}
-- Pitch 표준편차: {analysis['pitch_std']}
-- 말 속도: {analysis['speech_rate']} 단어/초
-- 침묵 비율: {analysis['silence_ratio'] * 100:.1f}%
-- 감정 상태: {analysis['emotion']}
-"""
-    # 면접자의 전체 답변(텍스트)
-    transcribe_desc = analysis['transcribe_text']
     
-    # ✅ 최종 프롬프트
-    return f"""
-당신은 면접 코치입니다. 아래는 면접자의 분석 데이터입니다.
+# 점수 계산 함수
+def calculate_score(chart: dict) -> float:
+    weights = {
+        "일관성": 0.20,
+        "논리성": 0.20,
+        "대처능력": 0.15,
+        "구체성": 0.15,
+        "말하기방식": 0.15,
+        "면접태도": 0.15,
+    }
+    score = sum(chart[k] * weights[k] * 20 for k in chart)
+    return round(score, 1)
+    
+# 📌 Claude 응답 파싱 및 점수 추가
+def parse_claude_feedback_and_score(raw_text: str) -> dict:
+    try:
+        result = json.loads(raw_text)
+        result['score'] = calculate_score(result['chart'])
+        return result
+    except Exception as e:
+        return {
+            "error": "Claude 응답 파싱 실패",
+            "detail": str(e),
+            "raw": raw_text
+        }
 
-[전체 답변 결과]
-{transcribe_desc}
-
-[음성 분석 결과]
-{voice_desc}
-
-[자세 분석 결과]
-{posture_desc}
-
-위 데이터를 바탕으로 면접자의 답변을 다음 기준으로 피드백을 제시해주세요:
-1. 일관성: 답변 전체에 흐름이 있고 앞뒤가 자연스럽게 연결되는가?
-2. 논리성: 주장에 대해 명확한 이유와 근거가 있으며 논리적 흐름이 있는가?
-3. 대처능력: 예상치 못한 질문에도 당황하지 않고 유연하게 답했는가?
-4. 구체성: 추상적인 설명보다 구체적인 경험과 예시가 포함되어 있는가?
-5. 음성 피드백 : 음성 분석 결과를 기준으로 피드백을 제시해주세요.
-6. 자세 피드백 : 자세 분석 결과를 기준으로 피드백을 제시해주세요.
-
-각 피드백 결과는 2~3문장 정도의 길이로 생성하고, 최대한 핵심적인 요소를 강조해주세요.
-"""
 
 def analyze_speech_rate_via_transcribe(transcribed_text, audio_path):
     y, sr = librosa.load(audio_path, sr=None)
@@ -484,8 +470,9 @@ def analyze_speech_rate_via_transcribe(transcribed_text, audio_path):
         return 0
     return round(word_count / duration, 2)  # 단어 수 ÷ 총 시간(초)
 
-# API 뷰: 전체 분석 + 프롬프트
+# [1] 음성 분석 API (전처리 + 분석만 수행)
 @api_view(['POST'])
+@permission_classes([IsAuthenticated])
 def analyze_voice_api(request):
     start_time = time.time()
 
@@ -493,6 +480,7 @@ def analyze_voice_api(request):
     prefix = 'audio/'  # 여러 질문 오디오가 여기에 저장되어 있다고 가정
 
     posture_count = request.data.get('posture_count', 0)
+    # transcribe_text = request.data.get('transcribe_text', '')
 
     try:
         # 1. 다중 오디오 다운로드 및 병합
@@ -506,11 +494,10 @@ def analyze_voice_api(request):
         # ✅ Transcribe 분석 (STT 텍스트 추출)
         s3_key = "merged/merged_audio.wav"
         upload_merged_audio_to_s3(merged_audio_path, bucket, s3_key)
-        transcribe_text = merge_texts_from_s3_folder(email_prefix, upload_id, bucket)
-
+        transcribe_text = merge_texts_from_s3_folder(bucket, s3_key)
         # 2. 분석 시작
         pitch_result = analyze_pitch(merged_audio_path)
-        speech_rate = analyze_speech_rate_via_transcribe(merged_audio_path)
+        speech_rate = analyze_speech_rate_via_transcribe(transcribe_text, merged_audio_path)
         silence_ratio = analyze_silence_ratio(merged_audio_path)
         emotion = analyze_emotion(merged_audio_path)
 
@@ -520,25 +507,124 @@ def analyze_voice_api(request):
             'silence_ratio': silence_ratio,
             'emotion': emotion,
             'posture_count': posture_count,
+            'transcribe_text': transcribe_text
         }
-
-        prompt = create_prompt(result)
-        feedback = get_claude_feedback(prompt)
-
+        
         elapsed_time = round(time.time() - start_time, 2)
 
-        return JsonResponse(
-            json.loads(json.dumps({
-                'analysis': result,
-                'prompt_to_claude': prompt,
-                'claude_feedback': feedback,
-                'response_time_seconds': elapsed_time
-            }, ensure_ascii=False, indent=4)),
-            json_dumps_params={'ensure_ascii': False}
-        )
+        return JsonResponse({
+            'analysis': result,
+            'response_time_seconds': elapsed_time
+        }, json_dumps_params={'ensure_ascii': False})
 
     except Exception as e:
         return JsonResponse({'error': str(e)}, status=500)
+ 
+# [2] 피드백 리포트 생성 API (STT 분석 결과 기반)
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def generate_feedback_report(request):
+    user = request.user
+    analysis = request.data.get("analysis")
+
+    # merge_texts_from_s3_folder 호출하여 transcript 획득
+    if not analysis.get('transcribe_text'):
+        # email_prefix나 upload_id는 클라이언트에서 전달
+        email_prefix = analysis.get('email_prefix', user.email)
+        upload_id = analysis.get('upload_id')
+        transcribe_text = merge_texts_from_s3_folder(email_prefix, upload_id)
+        analysis['transcribe_text'] = transcribe_text
+
+    # 프롬프트 생성
+    posture_count = analysis.get("posture_count", 0)
+		
+		# 프롬프트 구성
+    voice_desc = f"""
+- 목소리 떨림: {analysis['voice_tremor']}
+- Pitch 표준편차: {analysis['pitch_std']}
+- 말 속도: {analysis['speech_rate']} 단어/초
+- 침묵 비율: {analysis['silence_ratio'] * 100:.1f}%
+- 감정 상태: {analysis['emotion']}
+"""
+
+    posture_desc = f"면접 중 총 {posture_count}회의 자세 흔들림이 감지되었습니다."
+    transcribe_desc = analysis["transcribe_text"]
+
+    prompt = f"""
+당신은 AI 면접 코치입니다. 아래는 면접자의 분석 데이터입니다:
+
+[전체 답변 결과]
+{transcribe_desc}
+
+[음성 분석 결과]
+{voice_desc}
+
+[자세 분석 결과]
+{posture_desc}
+
+---
+
+위 데이터를 바탕으로 면접자의 답변을 다음 기준으로 피드백을 제시해주세요:
+1. 일관성: 답변 전체에 흐름이 있고 앞뒤가 자연스럽게 연결되는가?
+2. 논리성: 주장에 대해 명확한 이유와 근거가 있으며 논리적 흐름이 있는가?
+3. 대처능력: 예상치 못한 질문에도 당황하지 않고 유연하게 답했는가?
+4. 구체성: 추상적인 설명보다 구체적인 경험과 예시가 포함되어 있는가?
+5. 음성 피드백 : 음성 분석 결과를 기준으로 피드백을 제시해주세요.
+6. 자세 피드백 : 자세 분석 결과를 기준으로 피드백을 제시해주세요.
+
+각 항목에 대해 피드백을 작성하고, 최대한 핵심적인 요소를 강조해주세요. 그리고 0~5점 점수를 chart로 표현해주세요.
+다음 JSON 형식으로만 응답해주세요:
+
+
+{{
+  "summary": "...",
+  "detail": {{
+    "일관성": "...",
+    "논리성": "...",
+    "대처능력": "...",
+    "구체성": "...",
+    "말하기방식": "...",
+    "면접태도": "..."
+  }},
+  "chart": {{
+    "일관성": 0~5,
+    "논리성": 0~5,
+    "대처능력": 0~5,
+    "구체성": 0~5,
+    "말하기방식": 0~5,
+    "면접태도": 0~5
+  }}
+}}
+
+⚠️ 반드시 위 JSON 구조로만 응답해주세요.
+JSON 코드 블럭(```json ...```) 안에만 결과를 담아주세요.
+"""
+
+    raw_text = get_claude_feedback(prompt)
+    
+    feedback = parse_claude_feedback_and_score(raw_text)
+    return Response(feedback)
+
+    
+
+def parse_claude_feedback_and_score(prompt: str) -> dict:
+    """
+    Claude API 호출 후 JSON 파싱 및 점수 계산을 수행합니다.
+    실패 시 원시 응답과 함께 에러 메시지를 포함합니다.
+    """
+
+    feedback_raw = get_claude_feedback(prompt)
+
+    try:
+        feedback = json.loads(feedback_raw)
+        feedback['score'] = calculate_score(feedback['chart'])
+        return feedback
+    except Exception as e:
+        return {
+            'error': 'Claude 응답 파싱 실패',
+            'detail': str(e),
+            'raw': feedback_raw
+        }
     
 #잘못된 자세 카운트
 @api_view(['POST'])
@@ -747,8 +833,10 @@ class FullVideoUploadView(APIView):
 @permission_classes([IsAuthenticated])
 def extract_bad_posture_clips(request):
     import requests
+    import traceback
 
     try:
+        print("[🔍 segments 수신 내용]", request.data.get("segments"))
         video_id = request.data.get("videoId")
         if not video_id:
             return Response({"error": "videoId는 필수입니다."}, status=400)
@@ -771,30 +859,31 @@ def extract_bad_posture_clips(request):
         s3.download_fileobj(settings.AWS_FULL_VIDEO_BUCKET_NAME, video_key, full_video_temp)
         full_video_temp.close()
 
-        today_str = datetime.now().strftime("%m%d")
-
-        base_clip_prefix = f"clips/{email_prefix}/"
-        response = s3.list_objects_v2(Bucket=settings.AWS_CLIP_VIDEO_BUCKET_NAME, Prefix=base_clip_prefix)
-        count = sum(1 for obj in response.get('Contents', []) if today_str in obj['Key'])
-        upload_id = f"{today_str}-{count + 1}"  
-
         # MoviePy로 클립 추출
         converted_video_path = convert_webm_to_mp4(full_video_temp.name)
         video = mp.VideoFileClip(converted_video_path)
         clip_urls = []
+        duration = video.duration  # 전체 길이(초) 구하기
 
         for idx, segment in enumerate(posture_data):
+            # 시작/끝을 float로 파싱 & 음수 방지, 끝은 전체 길이 넘지 않게
             try:
-                start = float(segment["start"])
-                end = float(segment["end"])
+                start = max(0.0, float(segment["start"]))
+                end   = min(duration, float(segment["end"]))
             except Exception as e:
                 return Response({"error": f"start/end 변환 실패: {str(e)}"}, status=400)
 
+            # 유효 구간이 아니면 건너뛰기
+            if end <= start:
+                continue
+
+            # 클립 추출
             clip = video.subclip(start, end)
             clip_path = tempfile.NamedTemporaryFile(delete=False, suffix=".mp4").name
             clip.write_videofile(clip_path, codec="libx264", audio_codec="aac", logger=None)
 
-            clip_s3_key = f"clips/{email_prefix}/{upload_id}/{video_id}_clip_{idx+1}.mp4"
+            # S3 업로드드
+            clip_s3_key = f"clips/{email_prefix}/{video_id}_clip_{idx+1}.mp4"
 
             s3.upload_file(
                 clip_path,
@@ -803,6 +892,7 @@ def extract_bad_posture_clips(request):
                 ExtraArgs={"ContentType": "video/mp4"}
             )
 
+            # 업로드 URL 생성성
             clip_url = f"https://{settings.AWS_CLIP_VIDEO_BUCKET_NAME}.s3.{settings.AWS_S3_REGION_NAME}.amazonaws.com/{clip_s3_key}"
             clip_urls.append(clip_url)
 

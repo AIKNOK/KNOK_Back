@@ -919,7 +919,6 @@ def extract_bad_posture_clips(request):
 
             # S3 업로드
             clip_s3_key = f"clips/{email_prefix}/{video_id}_clip_{idx+1}.mp4"
-
             s3.upload_file(
                 clip_path,
                 settings.AWS_CLIP_VIDEO_BUCKET_NAME,
@@ -927,13 +926,40 @@ def extract_bad_posture_clips(request):
                 ExtraArgs={"ContentType": "video/mp4"}
             )
 
-            # 업로드 URL 생성성
+            # 업로드 URL 생성
             clip_url = f"https://{settings.AWS_CLIP_VIDEO_BUCKET_NAME}.s3.{settings.AWS_S3_REGION_NAME}.amazonaws.com/{clip_s3_key}"
             clip_urls.append(clip_url)
 
+        # ✅ PDF 생성 (루프 바깥에서 한 번만)
+        def generate_feedback_pdf(text, path):
+            c = canvas.Canvas(path, pagesize=A4)
+            width, height = A4
+            y = height - 50
+            for line in text.strip().split('\n'):
+                c.drawString(50, y, line.strip())
+                y -= 20
+                if y < 50:
+                    c.showPage()
+                    y = height - 50
+            c.save()
+
+        pdf_path = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf").name
+        generate_feedback_pdf(feedback_text, pdf_path)
+
+        pdf_s3_key = f"clips/{email_prefix}/{video_id}_report.pdf"
+        s3.upload_file(
+            pdf_path,
+            settings.AWS_CLIP_VIDEO_BUCKET_NAME,
+            pdf_s3_key,
+            ExtraArgs={"ContentType": "application/pdf"}
+        )
+        pdf_url = f"https://{settings.AWS_CLIP_VIDEO_BUCKET_NAME}.s3.{settings.AWS_S3_REGION_NAME}.amazonaws.com/{pdf_s3_key}"
+
+
         return Response({
             "message": "클립 저장 완료",
-            "clips": clip_urls
+            "clips": clip_urls,
+            "pdf_url": pdf_url
         })
 
     except Exception as e:
@@ -1076,3 +1102,49 @@ def get_ordered_question_audio(request):
     results = list(filter(None, parsed))
     results = sorted(results, key=lambda x: x["order"])
     return Response(results)
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def download_feedback_zip(request):
+    """
+    클립 + 리포트 PDF가 있는 S3 경로의 파일들을 ZIP으로 묶어 반환
+    """
+    import zipfile
+    import tempfile
+    import os
+
+    email_prefix = request.user.email.split('@')[0]
+    video_id = request.data.get("videoId")
+    if not video_id:
+        return Response({"error": "videoId는 필수입니다."}, status=400)
+
+    prefix = f"clips/{email_prefix}/{video_id}_"
+    bucket = settings.AWS_CLIP_VIDEO_BUCKET_NAME
+    s3 = boto3.client('s3')
+
+    # ✅ prefix로 S3 객체 목록 조회
+    objects = s3.list_objects_v2(Bucket=bucket, Prefix=f"clips/{email_prefix}/")
+    if 'Contents' not in objects:
+        return Response({"error": "해당 경로에 파일이 없습니다."}, status=404)
+
+    target_keys = [
+        obj['Key']
+        for obj in objects['Contents']
+        if obj['Key'].startswith(prefix) and obj['Key'].endswith('.mp4') or obj['Key'].endswith('.pdf')
+    ]
+
+    if not target_keys:
+        return Response({"error": "클립 또는 PDF 파일이 없습니다."}, status=404)
+
+    # ✅ 임시 폴더에 다운로드 및 ZIP 생성
+    with tempfile.TemporaryDirectory() as tmpdir:
+        zip_path = os.path.join(tmpdir, f"{video_id}_feedback.zip")
+
+        with zipfile.ZipFile(zip_path, 'w') as zipf:
+            for key in target_keys:
+                local_path = os.path.join(tmpdir, os.path.basename(key))
+                s3.download_file(bucket, key, local_path)
+                zipf.write(local_path, arcname=os.path.basename(key))
+
+        # ✅ 직접 다운로드 반환
+        return FileResponse(open(zip_path, 'rb'), as_attachment=True, filename=f"{video_id}_feedback.zip")

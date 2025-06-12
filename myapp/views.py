@@ -9,7 +9,7 @@ from myapp.utils.followup_logic import should_generate_followup
 from myapp.utils.token_utils import decode_cognito_id_token
 from urllib.parse import quote 
 
-
+import requests
 import re
 import json
 import boto3
@@ -943,3 +943,30 @@ def get_ordered_question_audio(request):
     results = sorted(results, key=lambda x: x["order"])
     return Response(results)
 
+@api_view(['POST'])
+def call_zonos_tts(request):
+    url = "http://localhost:8001/api/generate-zonos/tts/"
+
+    text = request.data.get("text")
+    if not text:
+        return Response({"error": "text 값이 필요합니다."}, status=400)
+
+    data = {
+        "text": text
+    }
+    # POST 요청 보내기
+    response = requests.post(url, json=data)
+
+    # 응답 처리
+    if response.status_code == 200:
+        result = response.json()
+        return Response({
+            "message": "음성 생성 성공!",
+            "file_url": result.get("file_url")
+        })
+    else:
+        return Response({
+            "error": "음성 생성 실패",
+            "status_code": response.status_code,
+            "detail": response.text
+        }, status=500)

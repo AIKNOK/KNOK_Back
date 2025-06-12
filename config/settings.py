@@ -15,6 +15,7 @@ from decouple import config
 from datetime import timedelta
 from corsheaders.defaults import default_headers
 
+
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -144,6 +145,8 @@ AWS_FULL_VIDEO_BUCKET_NAME = config("AWS_FULL_VIDEO_BUCKET_NAME")
 AWS_CLIP_VIDEO_BUCKET_NAME = config("AWS_CLIP_VIDEO_BUCKET_NAME")
 AWS_S3_REGION_NAME = config('AWS_S3_REGION_NAME')
 AWS_S3_CUSTOM_DOMAIN = f"{AWS_STORAGE_BUCKET_NAME}.s3.amazonaws.com"
+AWS_TTS_BUCKET_NAME = config("TTS_BUCKET_NAME")
+AWS_FOLLOWUP_QUESTION_BUCKET_NAME = config("AWS_FOLLOWUP_QUESTION_BUCKET_NAME")
 
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': [

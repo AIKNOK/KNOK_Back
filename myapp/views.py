@@ -870,7 +870,6 @@ class FullVideoUploadView(APIView):
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def extract_bad_posture_clips(request):
-    import requests
     import traceback
 
     try:
@@ -901,7 +900,7 @@ def extract_bad_posture_clips(request):
         clip_urls = []
         duration = video.duration  # 전체 길이(초) 구하기
 
-        for idx, segment in enumerate(posture_data):
+        for idx, segment in enumerate(segments):
             # 시작/끝을 float로 파싱 & 음수 방지, 끝은 전체 길이 넘지 않게
             try:
                 start = max(0.0, float(segment["start"]))
@@ -918,7 +917,7 @@ def extract_bad_posture_clips(request):
             clip_path = tempfile.NamedTemporaryFile(delete=False, suffix=f"_clip_{idx+1}.mp4").name
             clip.write_videofile(clip_path, codec="libx264", audio_codec="aac", logger=None)
 
-            # S3 업로드드
+            # S3 업로드
             clip_s3_key = f"clips/{email_prefix}/{video_id}_clip_{idx+1}.mp4"
 
             s3.upload_file(

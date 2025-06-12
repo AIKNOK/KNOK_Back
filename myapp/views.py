@@ -705,10 +705,25 @@ def decide_followup_question(request):
     except Exception as e:
         return Response({'error': 'S3 저장 실패', 'detail': str(e)}, status=500)
 
+    # TTS 서버 호출
+    tts_url = "http://localhost:8001/api/generate-zonos/tts/"
+    try:
+        tts_response = requests.post(tts_url, json={
+            "question_number": followup_question_number,
+            "text": question
+        })
+        if tts_response.status_code != 200:
+            raise Exception(tts_response.text)
+        tts_result = tts_response.json()
+        audio_url = tts_result.get("file_url")
+    except Exception as e:
+        return Response({'error': 'TTS 호출 실패', 'detail': str(e)}, status=500)
+
     return Response({
         'followup': True,
         'question_number': followup_question_number,
         'question': question,
+        'audio_url': audio_url,
         'matched_keywords': matched_keywords
     })
 
@@ -1062,31 +1077,3 @@ def get_ordered_question_audio(request):
     results = list(filter(None, parsed))
     results = sorted(results, key=lambda x: x["order"])
     return Response(results)
-
-@api_view(['POST'])
-def call_zonos_tts(request):
-    url = "http://localhost:8001/api/generate-zonos/tts/"
-
-    text = request.data.get("text")
-    if not text:
-        return Response({"error": "text 값이 필요합니다."}, status=400)
-
-    data = {
-        "text": text
-    }
-    # POST 요청 보내기
-    response = requests.post(url, json=data)
-
-    # 응답 처리
-    if response.status_code == 200:
-        result = response.json()
-        return Response({
-            "message": "음성 생성 성공!",
-            "file_url": result.get("file_url")
-        })
-    else:
-        return Response({
-            "error": "음성 생성 실패",
-            "status_code": response.status_code,
-            "detail": response.text
-        }, status=500)

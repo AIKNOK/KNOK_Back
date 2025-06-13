@@ -6,8 +6,12 @@ from datetime import datetime
 from amazon_transcribe.client import TranscribeStreamingClient
 from amazon_transcribe.handlers import TranscriptResultStreamHandler
 from starlette.websockets import WebSocketDisconnect
-import boto3
 from dotenv import load_dotenv
+
+import boto3
+import requests
+import json
+
 
 load_dotenv()
 upload_id_cache = {}
@@ -107,9 +111,15 @@ async def transcribe_ws(websocket: WebSocket, email: str = Query(...), question_
     finally:
         print("✅ WebSocket STT 완료")
         try:
+             # Claude 3.5로 전사 보정
+            refined_transcript = await refine_transcript_with_claude(transcript_text)
+
+            # 오디오 저장
             save_audio_to_s3(audio_buffer, email, upload_id, question_id)
-            save_transcript_to_s3(transcript_text, email, upload_id, question_id)
-            send_transcript_to_django(email, question_id, transcript_text, token)
+
+            # ✅ 보정된 텍스트 저장 및 전송
+            save_transcript_to_s3(refined_transcript, email, upload_id, question_id)
+            send_transcript_to_django(email, question_id, refined_transcript, token)
         except Exception as e:
             print("❌ 후처리 실패:", e)
         try:
@@ -210,3 +220,52 @@ def get_upload_id(email_prefix):
 
     new_index = len(existing_ids) + 1
     return f"{today_str}-{new_index}"
+
+# 텍스트 보정
+async def refine_transcript_with_claude(transcript_text: str) -> str:
+    if not transcript_text.strip():
+        print("⚠️ 전사 텍스트가 비어 있어 Claude 호출 생략")
+        return transcript_text
+
+    try:
+        client = boto3.client(
+            "bedrock-runtime", 
+            region_name="us-east-1",
+            aws_access_key_id=os.getenv("AWS_ACCESS_KEY_ID"),         # 🔐 반드시 .env에 존재
+            aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY")  # 🔐 반드시 .env에 존재)  # ✅ 리전
+        )
+
+        body = {
+            "anthropic_version": "bedrock-2023-05-31",
+            "messages": [
+                {
+                    "role": "user",
+                    "content": f"""
+다음은 음성 인식으로 생성된 한국어 전사 결과입니다. 문법 오류, 누락된 문장부호, 의미 전달에 방해되는 오타를 자연스럽게 보정해주세요:
+
+[전사 시작]
+{transcript_text}
+[전사 끝]
+"""
+                }
+            ],
+            "max_tokens": 1024,
+            "temperature": 0.3,
+        }
+
+        response = client.invoke_model(
+            modelId="anthropic.claude-3-haiku-20240307-v1:0",
+            contentType="application/json",
+            accept="application/json",
+            body=json.dumps(body)
+        )
+
+        result = json.loads(response["body"].read())
+        refined_text = result["content"][0]["text"]
+
+        print("📤 Claude 보정 결과:", refined_text)
+        return refined_text
+
+    except Exception as e:
+        print("❌ Claude (Bedrock) 호출 실패:", e)
+        return transcript_text

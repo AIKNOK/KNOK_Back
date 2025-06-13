@@ -45,7 +45,7 @@ urlpatterns = [
     path("video/extract-clips/", extract_bad_posture_clips),
     path("save_transcribed_text/", save_transcribed_text, name="save_transcribed_text"),
     path('questions/audio/', views.get_ordered_question_audio, name='get_ordered_question_audio'),
-
+    path('transcript/', save_transcribed_text, name='save_transcribed_text'),
 
     
     # ✅ 추가: 프론트에서 요청하는 경로에 맞춤

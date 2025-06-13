@@ -20,6 +20,7 @@ from .views import (
     get_all_questions_view,
     generate_feedback_report,
     download_feedback_zip,
+    send_to_slack,
 )
 
 urlpatterns = [
@@ -52,6 +53,9 @@ urlpatterns = [
     
     # ✅ 추가: 프론트에서 요청하는 경로에 맞춤
     path('interview/feedback/generate/', generate_feedback_report, name='generate_feedback'),
+
+    # slack 문의
+    path('contact/', send_to_slack, name='send_to_slack'),
 
     # ❓ 꼬리 질문 여부 판단
     path('followup/check/', decide_followup_question, name='followup_check'),

@@ -1140,3 +1140,34 @@ def generate_feedback_pdf_view(request):
         import traceback
         print("🔥 피드백 PDF 생성 예외:", traceback.format_exc())
         return Response({"error": str(e)}, status=500)
+
+SLACK_WEBHOOK_URL = "https://hooks.slack.com/services/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"
+
+@csrf_exempt
+def send_to_slack(request):
+    if request.method == "POST":
+        try:
+            data = json.loads(request.body)
+            name = data.get("name", "이름 없음")
+            email = data.get("email", "이메일 없음")
+            message = data.get("message", "내용 없음")
+
+            slack_data = {
+                "text": f"📩 *새 문의가 도착했습니다!*\n\n👤 이름: {name}\n📧 이메일: {email}\n📝 내용: {message}"
+            }
+
+            response = requests.post(
+                SLACK_WEBHOOK_URL,
+                json=slack_data,
+                headers={"Content-Type": "application/json"}
+            )
+
+            if response.status_code == 200:
+                return JsonResponse({"success": True})
+            else:
+                return JsonResponse({"success": False, "error": response.text}, status=500)
+
+        except Exception as e:
+            return JsonResponse({"success": False, "error": str(e)}, status=500)
+
+    return JsonResponse({"error": "POST 요청만 지원됩니다."}, status=400)

@@ -1,22 +1,9 @@
-from reportlab.pdfgen import canvas
-from reportlab.lib.pagesizes import A4
 import tempfile
 import boto3
 from django.conf import settings
 
-def generate_feedback_pdf_and_upload(email_prefix, video_id, feedback_text):
-    # PDF 파일 생성
+def feedback_pdf_upload(email_prefix, video_id):
     pdf_path = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf").name
-    c = canvas.Canvas(pdf_path, pagesize=A4)
-    width, height = A4
-    y = height - 50
-    for line in feedback_text.strip().split('\n'):
-        c.drawString(50, y, line.strip())
-        y -= 20
-        if y < 50:
-            c.showPage()
-            y = height - 50
-    c.save()
 
     # S3 업로드
     s3 = boto3.client(

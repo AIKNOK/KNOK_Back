@@ -6,7 +6,7 @@ from rest_framework.decorators import authentication_classes, permission_classes
 from pydub import AudioSegment
 from myapp.utils.keyword_extractor import extract_resume_keywords
 from myapp.utils.followup_logic import should_generate_followup
-from myapp.utils.pdf import generate_feedback_pdf_and_upload
+from myapp.utils.pdf import feedback_pdf_upload
 from myapp.utils.token_utils import decode_cognito_id_token
 from urllib.parse import quote 
 
@@ -27,6 +27,7 @@ import PyPDF2
 import moviepy.editor as mp
 import subprocess
 import os
+import traceback
 
 from django.conf import settings
 from .models import Resume
@@ -1110,18 +1111,27 @@ def download_feedback_zip(request):
     if not target_keys:
         return Response({"error": "클립 또는 PDF 파일이 없습니다."}, status=404)
 
-    # ✅ 임시 폴더에 다운로드 및 ZIP 생성
-    with tempfile.TemporaryDirectory() as tmpdir:
-        zip_path = os.path.join(tmpdir, f"{video_id}_feedback.zip")
+    # ✅ zip 파일을 임시로 생성
+    tmp_zip = tempfile.NamedTemporaryFile(delete=False, suffix=".zip")
+    zip_path = tmp_zip.name
+    tmp_zip.close()
 
-        with zipfile.ZipFile(zip_path, 'w') as zipf:
-            for key in target_keys:
-                local_path = os.path.join(tmpdir, os.path.basename(key))
-                s3.download_file(bucket, key, local_path)
-                zipf.write(local_path, arcname=os.path.basename(key))
+    with zipfile.ZipFile(zip_path, 'w') as zipf:
+        for key in target_keys:
+            local_path = tempfile.NamedTemporaryFile(delete=False).name
+            s3.download_file(bucket, key, local_path)
+            zipf.write(local_path, arcname=os.path.basename(key))
+            os.remove(local_path)  # 임시 다운로드 파일 제거
 
-        # ✅ 직접 다운로드 반환
-        return FileResponse(open(zip_path, 'rb'), as_attachment=True, filename=f"{video_id}_feedback.zip")
+    
+    if not os.path.exists(zip_path):
+        print("❌ ZIP 파일 생성 실패:", zip_path)
+        return Response({"error": "ZIP 파일이 존재하지 않습니다."}, status=500)
+
+    response = FileResponse(open(zip_path, 'rb'), as_attachment=True, filename=os.path.basename(zip_path))
+    response['Content-Type'] = 'application/zip'
+    return response
+
     
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
@@ -1133,7 +1143,7 @@ def generate_feedback_pdf_view(request):
             return Response({"error": "videoId, feedback_text 필수"}, status=400)
 
         email_prefix = request.user.email.split('@')[0]
-        pdf_url = generate_feedback_pdf_and_upload(email_prefix, video_id, feedback_text)
+        pdf_url = feedback_pdf_upload(email_prefix, video_id)
         return Response({"pdf_url": pdf_url})
 
     except Exception as e:
@@ -1141,12 +1151,15 @@ def generate_feedback_pdf_view(request):
         print("🔥 피드백 PDF 생성 예외:", traceback.format_exc())
         return Response({"error": str(e)}, status=500)
 
-SLACK_WEBHOOK_URL = "https://hooks.slack.com/services/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"
+SLACK_WEBHOOK_URL = "https://hooks.slack.com/services/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"
 
 @csrf_exempt
 def send_to_slack(request):
     if request.method == "POST":
         try:
+            print("요청 수신됨")
+            print("request.body:", request.body)
+
             data = json.loads(request.body)
             name = data.get("name", "이름 없음")
             email = data.get("email", "이메일 없음")
@@ -1162,12 +1175,17 @@ def send_to_slack(request):
                 headers={"Content-Type": "application/json"}
             )
 
+            print("슬랙 응답 코드:", response.status_code)
+            print("슬랙 응답 내용:", response.text)
+
             if response.status_code == 200:
                 return JsonResponse({"success": True})
             else:
                 return JsonResponse({"success": False, "error": response.text}, status=500)
 
         except Exception as e:
+            print("예외 발생:")
+            traceback.print_exc()
             return JsonResponse({"success": False, "error": str(e)}, status=500)
 
     return JsonResponse({"error": "POST 요청만 지원됩니다."}, status=400)

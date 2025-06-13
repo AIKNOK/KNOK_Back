@@ -6,6 +6,7 @@ from rest_framework.decorators import authentication_classes, permission_classes
 from pydub import AudioSegment
 from myapp.utils.keyword_extractor import extract_resume_keywords
 from myapp.utils.followup_logic import should_generate_followup
+from myapp.utils.pdf import generate_feedback_pdf_and_upload
 from myapp.utils.token_utils import decode_cognito_id_token
 from urllib.parse import quote 
 
@@ -34,6 +35,7 @@ from django.http import JsonResponse
 from pathlib import Path
 from django.views.decorators.csrf import csrf_exempt
 from django.utils.decorators import method_decorator
+from django.http import FileResponse
 from datetime import datetime
 from reportlab.pdfgen import canvas  # or your preferred PDF lib
 from reportlab.lib.pagesizes import A4
@@ -876,7 +878,6 @@ def extract_bad_posture_clips(request):
         print("[🔍 segments 수신 내용]", request.data.get("segments"))
         video_id = request.data.get("videoId")
         segments = request.data.get("segments")
-        feedback_text = request.data.get("feedback_text", "면접 분석 피드백 PDF 예시입니다.")  # 프론트에서 분석문 전달하면 여기에
         if not video_id or not segments:
             return Response({"error": "videoId, segments 필수"}, status=400)
 
@@ -930,36 +931,9 @@ def extract_bad_posture_clips(request):
             clip_url = f"https://{settings.AWS_CLIP_VIDEO_BUCKET_NAME}.s3.{settings.AWS_S3_REGION_NAME}.amazonaws.com/{clip_s3_key}"
             clip_urls.append(clip_url)
 
-        # ✅ PDF 생성 (루프 바깥에서 한 번만)
-        def generate_feedback_pdf(text, path):
-            c = canvas.Canvas(path, pagesize=A4)
-            width, height = A4
-            y = height - 50
-            for line in text.strip().split('\n'):
-                c.drawString(50, y, line.strip())
-                y -= 20
-                if y < 50:
-                    c.showPage()
-                    y = height - 50
-            c.save()
-
-        pdf_path = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf").name
-        generate_feedback_pdf(feedback_text, pdf_path)
-
-        pdf_s3_key = f"clips/{email_prefix}/{video_id}_report.pdf"
-        s3.upload_file(
-            pdf_path,
-            settings.AWS_CLIP_VIDEO_BUCKET_NAME,
-            pdf_s3_key,
-            ExtraArgs={"ContentType": "application/pdf"}
-        )
-        pdf_url = f"https://{settings.AWS_CLIP_VIDEO_BUCKET_NAME}.s3.{settings.AWS_S3_REGION_NAME}.amazonaws.com/{pdf_s3_key}"
-
-
         return Response({
             "message": "클립 저장 완료",
             "clips": clip_urls,
-            "pdf_url": pdf_url
         })
 
     except Exception as e:
@@ -1130,7 +1104,7 @@ def download_feedback_zip(request):
     target_keys = [
         obj['Key']
         for obj in objects['Contents']
-        if obj['Key'].startswith(prefix) and obj['Key'].endswith('.mp4') or obj['Key'].endswith('.pdf')
+        if obj['Key'].startswith(prefix) and (obj['Key'].endswith('.mp4') or obj['Key'].endswith('.pdf'))
     ]
 
     if not target_keys:
@@ -1148,3 +1122,21 @@ def download_feedback_zip(request):
 
         # ✅ 직접 다운로드 반환
         return FileResponse(open(zip_path, 'rb'), as_attachment=True, filename=f"{video_id}_feedback.zip")
+    
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def generate_feedback_pdf_view(request):
+    try:
+        video_id = request.data.get("videoId")
+        feedback_text = request.data.get("feedback_text")
+        if not video_id or not feedback_text:
+            return Response({"error": "videoId, feedback_text 필수"}, status=400)
+
+        email_prefix = request.user.email.split('@')[0]
+        pdf_url = generate_feedback_pdf_and_upload(email_prefix, video_id, feedback_text)
+        return Response({"pdf_url": pdf_url})
+
+    except Exception as e:
+        import traceback
+        print("🔥 피드백 PDF 생성 예외:", traceback.format_exc())
+        return Response({"error": str(e)}, status=500)

@@ -46,7 +46,7 @@ urlpatterns = [
     path('video/upload/', FullVideoUploadView.as_view(), name='upload-full-video'),
     path("video/extract-clips/", extract_bad_posture_clips),
     path("save_transcribed_text/", save_transcribed_text, name="save_transcribed_text"),
-    path('questions/audio/', views.get_ordered_question_audio, name='get_ordered_question_audio'),
+    path('questions/audio/', views.get_interview_question_audio_list, name='get_interview_question_audio_list'),
 
     # 피드백 다운로드
     path('video/download-zip/', download_feedback_zip),

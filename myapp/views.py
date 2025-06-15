@@ -37,7 +37,7 @@ from pathlib import Path
 from django.views.decorators.csrf import csrf_exempt
 from django.utils.decorators import method_decorator
 from django.http import FileResponse
-from datetime import datetime
+from datetime import timedelta
 from reportlab.pdfgen import canvas  # or your preferred PDF lib
 from reportlab.lib.pagesizes import A4
 
@@ -653,6 +653,8 @@ def decide_followup_question(request):
     if not all([resume_text, user_answer, base_question_number, interview_id]):
         return Response({'error': 'resume_text, user_answer, base_question_number, interview_id는 필수입니다.'}, status=400)
 
+    email_prefix = request.user.email.split('@')[0]
+
     # 1. 키워드 추출 및 follow-up 필요 여부 판단
     keywords = extract_resume_keywords(resume_text)
     should_generate = should_generate_followup(user_answer, keywords)
@@ -708,19 +710,16 @@ def decide_followup_question(request):
     except Exception as e:
         return Response({'error': 'S3 저장 실패', 'detail': str(e)}, status=500)
 
-    # TTS 서버 호출
-    tts_url = "http://localhost:8001/api/generate-zonos/tts/"
+    # 5. Polly로 음성 생성 및 저장
     try:
-        tts_response = requests.post(tts_url, json={
-            "question_number": followup_question_number,
-            "text": question
-        })
-        if tts_response.status_code != 200:
-            raise Exception(tts_response.text)
-        tts_result = tts_response.json()
-        audio_url = tts_result.get("file_url")
+        tts_key = f"tts_outputs/{email_prefix}/질문{followup_question_number}.mp3"
+        audio_url = synthesize_speech_and_upload_to_s3(
+            text=question,
+            bucket_name=settings.AWS_TTS_BUCKET_NAME,
+            key=tts_key
+        )
     except Exception as e:
-        return Response({'error': 'TTS 호출 실패', 'detail': str(e)}, status=500)
+        return Response({'error': 'Polly 호출 실패', 'detail': str(e)}, status=500)
 
     return Response({
         'followup': True,
@@ -873,14 +872,14 @@ class FullVideoUploadView(APIView):
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def extract_bad_posture_clips(request):
-    import traceback
-
     try:
         print("[🔍 segments 수신 내용]", request.data.get("segments"))
         video_id = request.data.get("videoId")
         segments = request.data.get("segments")
-        if not video_id or not segments:
-            return Response({"error": "videoId, segments 필수"}, status=400)
+        feedbacks = request.data.get("feedbacks")
+
+        if not video_id or not segments or not feedbacks:
+            return Response({"error": "videoId, segments, feedbacks 필수"}, status=400)
 
         email_prefix = request.user.email.split('@')[0]
         video_key = f"videos/{email_prefix}/{video_id}.webm"
@@ -892,25 +891,25 @@ def extract_bad_posture_clips(request):
             aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
             region_name=settings.AWS_S3_REGION_NAME
         )
+
         full_video_temp = tempfile.NamedTemporaryFile(delete=False, suffix=".webm")
         s3.download_fileobj(settings.AWS_FULL_VIDEO_BUCKET_NAME, video_key, full_video_temp)
         full_video_temp.close()
 
-        # webm → mp4 변환 (MoviePy 지원용)
+        # webm → mp4 변환
         converted_video_path = convert_webm_to_mp4(full_video_temp.name)
         video = mp.VideoFileClip(converted_video_path)
-        clip_urls = []
-        duration = video.duration  # 전체 길이(초) 구하기
+        duration = video.duration
+
+        results = []
 
         for idx, segment in enumerate(segments):
-            # 시작/끝을 float로 파싱 & 음수 방지, 끝은 전체 길이 넘지 않게
             try:
                 start = max(0.0, float(segment["start"]))
                 end   = min(duration, float(segment["end"]))
             except Exception as e:
                 return Response({"error": f"start/end 변환 실패: {str(e)}"}, status=400)
 
-            # 유효 구간이 아니면 건너뛰기
             if end <= start:
                 continue
 
@@ -919,7 +918,7 @@ def extract_bad_posture_clips(request):
             clip_path = tempfile.NamedTemporaryFile(delete=False, suffix=f"_clip_{idx+1}.mp4").name
             clip.write_videofile(clip_path, codec="libx264", audio_codec="aac", logger=None)
 
-            # S3 업로드
+            # 클립 업로드
             clip_s3_key = f"clips/{email_prefix}/{video_id}_clip_{idx+1}.mp4"
             s3.upload_file(
                 clip_path,
@@ -928,17 +927,42 @@ def extract_bad_posture_clips(request):
                 ExtraArgs={"ContentType": "video/mp4"}
             )
 
-            # 업로드 URL 생성
-            clip_url = f"https://{settings.AWS_CLIP_VIDEO_BUCKET_NAME}.s3.{settings.AWS_S3_REGION_NAME}.amazonaws.com/{clip_s3_key}"
-            clip_urls.append(clip_url)
+            # 썸네일 생성 및 업로드
+            thumbnail_path = tempfile.NamedTemporaryFile(delete=False, suffix=".jpg").name
+            clip.save_frame(thumbnail_path, t=(end - start) / 2)
+            thumbnail_s3_key = f"thumbnails/{email_prefix}/{video_id}_thumb_{idx+1}.jpg"
+            s3.upload_file(
+                thumbnail_path,
+                settings.AWS_CLIP_VIDEO_BUCKET_NAME,
+                thumbnail_s3_key,
+                ExtraArgs={"ContentType": "image/jpeg"}
+            )
+
+            # presigned URL 생성
+            clip_url = s3.generate_presigned_url(
+                'get_object',
+                Params={'Bucket': settings.AWS_CLIP_VIDEO_BUCKET_NAME, 'Key': clip_s3_key},
+                ExpiresIn=60 * 60
+            )
+            thumbnail_url = s3.generate_presigned_url(
+                'get_object',
+                Params={'Bucket': settings.AWS_CLIP_VIDEO_BUCKET_NAME, 'Key': thumbnail_s3_key},
+                ExpiresIn=60 * 60
+            )
+
+            results.append({
+                "clipUrl": clip_url,
+                "thumbnailUrl": thumbnail_url,
+                "feedback": feedbacks[idx] if idx < len(feedbacks) else ""
+            })
 
         return Response({
             "message": "클립 저장 완료",
-            "clips": clip_urls,
+            "clips": results,
         })
 
     except Exception as e:
-        print("🔥 클립 zip 추출 예외:", traceback.format_exc())
+        print("🔥 클립 추출 예외:", traceback.format_exc())
         return Response({"error": str(e)}, status=500)
 
 def convert_webm_to_mp4(input_path):
@@ -1026,57 +1050,58 @@ def get_all_questions_view(request):
 
     return Response({"questions": sorted_merged})
   
-# TTS 음성파일 가져오기
-@api_view(['GET'])
-@permission_classes([IsAuthenticated])
-def get_ordered_question_audio(request):
-    user = request.user
-    email_prefix = user.email.split('@')[0]
-    bucket = settings.AWS_TTS_BUCKET_NAME
-    prefix = f'tts_outputs/dlrjsgh8529/'
-    #
-    s3 = boto3.client(
-        's3',
-        aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
-        aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
-        region_name=settings.AWS_S3_REGION_NAME
-    )
+def get_interview_question_audio_list(request):
+    email = request.user.email
+    email_prefix = email.split('@')[0]
 
-    response = s3.list_objects_v2(Bucket=bucket, Prefix=prefix)
+    interview_id = request.query_params.get('interview_id')  # e.g., "0614-2"
+    if not interview_id:
+        return Response({'error': 'interview_id 파라미터가 필요합니다.'}, status=400)
+
+    bucket_name = settings.AWS_TTS_BUCKET_NAME
+    prefix = f"tts_outputs/{email_prefix}/{interview_id}/"
+
+    s3 = boto3.client('s3',
+                      aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
+                      aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
+                      region_name=settings.AWS_S3_REGION_NAME)
+
+    response = s3.list_objects_v2(Bucket=bucket_name, Prefix=prefix)
+
     if 'Contents' not in response:
-        print("⚠️ S3 목록이 비어있습니다.")
         return Response([], status=200)
 
-    wav_files = [obj['Key'] for obj in response['Contents'] if obj['Key'].endswith('.wav')]
-    print("🔍 S3에서 찾은 wav 파일들:", wav_files)
+    audio_files = [obj['Key'] for obj in response['Contents'] if obj['Key'].endswith('.mp3')]
 
-    def parse_question_info(key):
-        filename = key.split('/')[-1].replace('.wav', '').replace('질문 ', '')
-        match = re.match(r"^(\d+)(?:-(\d+))?$", filename)
-        if not match:
-            print(f"❌ 정규식 매칭 실패: {filename}")
-            return None
-        major = int(match.group(1))
-        minor = int(match.group(2)) if match.group(2) else 0
-        order = major + minor * 0.01
-        question_id = f"q{filename.replace('-', '_')}"
-        parent_id = f"q{major}" if minor else None
-        encoded_key = quote(key)
-        audio_url = f"https://{bucket}.s3.{settings.AWS_S3_REGION_NAME}.amazonaws.com/{encoded_key}"
-        print(f"✅ 파싱 성공: {question_id}, {audio_url}")
-        return {
-            "id": question_id,
-            "audio_url": audio_url,
-            "order": order,
-            "parent_id": parent_id
-        }
+    def parse_question_info(file_name):
+        file_stem = os.path.splitext(os.path.basename(file_name))[0]
+        match = re.match(r"질문(\d+(?:-\d+)?)", file_stem)
+        return match.group(1) if match else None
 
-    parsed = [parse_question_info(key) for key in wav_files]
-    print("🧾 파싱된 결과:", parsed)
+    def sort_key(file_name):
+        number = parse_question_info(file_name)
+        if not number:
+            return (float('inf'),)
+        parts = number.split('-')
+        return tuple(int(p) for p in parts)
 
-    results = list(filter(None, parsed))
-    results = sorted(results, key=lambda x: x["order"])
-    return Response(results)
+    audio_files.sort(key=sort_key)
+
+    audio_list = []
+    for file_name in audio_files:
+        number = parse_question_info(file_name)
+        if number:
+            parts = number.split('-')
+            parent_number = parts[0] if len(parts) > 1 else None
+            audio_url = f"https://{bucket_name}.s3.{settings.AWS_S3_REGION_NAME}.amazonaws.com/{file_name}"
+            audio_list.append({
+                "question_number": number,
+                "parent_number": parent_number,
+                "audio_url": audio_url
+            })
+
+    return Response(audio_list, status=200)
+
 
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
@@ -1151,7 +1176,7 @@ def generate_feedback_pdf_view(request):
         print("🔥 피드백 PDF 생성 예외:", traceback.format_exc())
         return Response({"error": str(e)}, status=500)
 
-SLACK_WEBHOOK_URL = "https://hooks.slack.com/services/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"
+SLACK_WEBHOOK_URL = "https://hooks.slack.com/services/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"
 
 @csrf_exempt
 def send_to_slack(request):
@@ -1189,3 +1214,27 @@ def send_to_slack(request):
             return JsonResponse({"success": False, "error": str(e)}, status=500)
 
     return JsonResponse({"error": "POST 요청만 지원됩니다."}, status=400)
+
+def synthesize_speech_and_upload_to_s3(text, bucket_name, key):
+    polly = boto3.client('polly', region_name=settings.AWS_REGION)
+    s3 = boto3.client(
+        's3',
+        aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
+        aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
+        region_name=settings.AWS_S3_REGION_NAME
+    )
+
+    response = polly.synthesize_speech(
+        Text=text,
+        OutputFormat='mp3',
+        VoiceId='Seoyeon'
+    )
+
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as temp_file:
+        temp_file.write(response['AudioStream'].read())
+        temp_file_path = temp_file.name
+
+    s3.upload_file(temp_file_path, bucket_name, key, ExtraArgs={"ContentType": "audio/mpeg"})
+    os.remove(temp_file_path)
+
+    return f"https://{bucket_name}.s3.{settings.AWS_S3_REGION_NAME}.amazonaws.com/{key}"

@@ -702,8 +702,6 @@ def decide_followup_question(request):
     if not all([resume_text, user_answer, base_question_number, interview_id]):
         return Response({'error': 'resume_text, user_answer, base_question_number, interview_id는 필수입니다.'}, status=400)
 
-    email_prefix = request.user.email.split('@')[0]
-
     # 1. 키워드 추출 및 follow-up 필요 여부 판단
     keywords = extract_resume_keywords(resume_text)
     should_generate = should_generate_followup(user_answer, keywords)
@@ -747,20 +745,18 @@ def decide_followup_question(request):
     next_suffix = max(suffix_numbers, default=0) + 1
     followup_question_number = f"{base_question_number}-{next_suffix}"
 
+    email = request.user.email 
+    username = email.split('@')[0] 
+
+    followup_bucket = settings.AWS_FOLLOWUP_QUESTION_BUCKET_NAME
+    s3_key = f"{username}/{interview_id}/{followup_question_number}.txt"
+
     # 4. S3에 질문 저장
     s3_client = boto3.client(
         "s3",
         aws_access_key_id=os.getenv("AWS_ACCESS_KEY_ID"),
         aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY"),
     )
-
-    email = request.user.email  # 인증된 유저의 이메일
-    username = email.split('@')[0]  # 'woco11@naver.com' → 'woco11'
-
-
-    followup_bucket = settings.AWS_FOLLOWUP_QUESTION_BUCKET_NAME
-    s3_key = f"{username}/{interview_id}/{followup_question_number}.txt"
-
 
     try:
         s3_client.put_object(
@@ -772,12 +768,28 @@ def decide_followup_question(request):
     except Exception as e:
         return Response({'error': 'S3 저장 실패', 'detail': str(e)}, status=500)
 
+    # TTS 서버 호출
+    tts_s3_key = f"tts_outputs/{username}/{interview_id}/질문{followup_question_number}.mp3"
+    try:
+        tts_response = requests.post(
+            "http://<TTS_SERVER_HOST>/tts",
+            json={"text": question, "s3_key": tts_s3_key},
+            timeout=10
+        )
+        tts_response.raise_for_status()
+        audio_url = tts_response.json().get("audio_url")
+        if not audio_url:
+            raise ValueError("TTS 서버 응답에 audio_url 없음")
+    except Exception as e:
+        return Response({'error': 'TTS 서버 호출 실패', 'detail': str(e)}, status=500)
+    
     return Response({
         'followup': True,
         'question_number': followup_question_number,
         'question': question,
         'matched_keywords': matched_keywords,
-        's3_key': s3_key 
+        's3_key': s3_key, 
+        'audio_url': audio_url
     })
 
 
@@ -1117,7 +1129,10 @@ def get_interview_question_audio_list(request):
                       aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
                       region_name=settings.AWS_S3_REGION_NAME)
 
-    response = s3.list_objects_v2(Bucket=bucket_name, Prefix=prefix)
+    try:
+        response = s3.list_objects_v2(Bucket=bucket_name, Prefix=prefix)
+    except Exception as e:
+        return Response({'error': 'S3 접근 실패', 'detail': str(e)}, status=500)
 
     if 'Contents' not in response:
         return Response([], status=200)
@@ -1133,25 +1148,25 @@ def get_interview_question_audio_list(request):
         number = parse_question_info(file_name)
         if not number:
             return (float('inf'),)
-        parts = number.split('-')
-        return tuple(int(p) for p in parts)
+        return tuple(int(part) for part in number.split('-'))
 
     audio_files.sort(key=sort_key)
 
-    audio_list = []
-    for file_name in audio_files:
-        number = parse_question_info(file_name)
-        if number:
-            parts = number.split('-')
-            parent_number = parts[0] if len(parts) > 1 else None
-            audio_url = f"https://{bucket_name}.s3.{settings.AWS_S3_REGION_NAME}.amazonaws.com/{file_name}"
-            audio_list.append({
-                "question_number": number,
-                "parent_number": parent_number,
-                "audio_url": audio_url
-            })
+    result = []
+    for file_key in audio_files:
+        number = parse_question_info(file_key)
+        if not number:
+            continue
 
-    return Response(audio_list, status=200)
+        parent_number = number.split("-")[0] if "-" in number else None
+
+        result.append({
+            "question_number": number,
+            "parent_number": parent_number,
+            "audio_url": f"https://{bucket_name}.s3.{settings.AWS_S3_REGION_NAME}.amazonaws.com/{file_key}"
+        })
+
+    return Response(result, status=200)
 
 
 @api_view(['POST'])
@@ -1265,28 +1280,6 @@ def send_to_slack(request):
             return JsonResponse({"success": False, "error": str(e)}, status=500)
 
     return JsonResponse({"error": "POST 요청만 지원됩니다."}, status=400)
-
-def synthesize_speech_and_upload_to_s3(text, bucket_name, key):
-    polly = boto3.client('polly', region_name=settings.AWS_REGION)
-    s3 = boto3.client(
-        's3',
-        aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
-        aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
-        region_name=settings.AWS_S3_REGION_NAME
-    )
-
-    response = polly.synthesize_speech(
-        Text=text,
-        OutputFormat='mp3',
-        VoiceId='Seoyeon'
-    )
-
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as temp_file:
-        temp_file.write(response['AudioStream'].read())
-        temp_file_path = temp_file.name
-
-    s3.upload_file(temp_file_path, bucket_name, key, ExtraArgs={"ContentType": "audio/mpeg"})
-    os.remove(temp_file_path)
 
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])

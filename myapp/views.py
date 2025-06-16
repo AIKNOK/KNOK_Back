@@ -6,17 +6,14 @@ from rest_framework.decorators import authentication_classes, permission_classes
 from pydub import AudioSegment
 from myapp.utils.keyword_extractor import extract_resume_keywords
 from myapp.utils.followup_logic import should_generate_followup
-from myapp.utils.token_utils import decode_cognito_id_token
 from urllib.parse import quote 
 
-import requests
 import re
 import json
 import boto3
 import hmac
 import hashlib
 import base64
-import uuid
 import tempfile
 import librosa
 import numpy as np
@@ -32,11 +29,7 @@ from .models import Resume
 from .serializers import ResumeSerializer
 from django.http import JsonResponse
 from pathlib import Path
-from django.views.decorators.csrf import csrf_exempt
-from django.utils.decorators import method_decorator
-from datetime import datetime
-from reportlab.pdfgen import canvas  # or your preferred PDF lib
-from reportlab.lib.pagesizes import A4
+
 
 # 🔐 SECRET_HASH 계산 함수 (Cognito)
 def get_secret_hash(username):
@@ -374,7 +367,7 @@ def generate_resume_questions(request):
     print("📦 최종 질문 (고정 + 검증된 질문):", final_questions)
 
     for idx, question in enumerate(final_questions, start=1):
-        filename = f"{email_prefix}/질문{idx}.txt"
+        filename = f"{email_prefix}/questions{idx}.txt"
         s3.put_object(
             Bucket=bucket_out,
             Key=filename,

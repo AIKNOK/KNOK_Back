@@ -1,10 +1,8 @@
-# fastapi_server.py
 import asyncio, json, wave, os, tempfile, requests
 from fastapi import FastAPI, WebSocket, Query
 from fastapi.middleware.cors import CORSMiddleware
 from datetime import datetime
 from amazon_transcribe.client import TranscribeStreamingClient
-from amazon_transcribe.handlers import TranscriptResultStreamHandler
 from starlette.websockets import WebSocketDisconnect
 from dotenv import load_dotenv
 

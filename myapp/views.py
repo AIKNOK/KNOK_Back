@@ -50,6 +50,7 @@ def get_secret_hash(username):
 
 
 # 📝 회원가입 API
+@csrf_exempt
 @api_view(['POST'])
 def signup(request):
     email = request.data.get('email')
@@ -703,9 +704,19 @@ def decide_followup_question(request):
     should_generate = should_generate_followup(user_answer, keywords)
     matched_keywords = [kw for kw in keywords if kw in user_answer]
 
+    # 🔍 로그 출력
+    print("🧾 이력서 키워드:", keywords)
+    print("🗣️ 사용자 답변:", user_answer)
+    print("✅ 매칭된 키워드:", matched_keywords)
+    print("📌 follow-up 생성 여부:", should_generate)
+
     if not should_generate:
-       return Response({'followup': False, 'matched_keywords': matched_keywords})
-    print("⚠️ 키워드 조건 무시하고 follow-up 질문 생성 강제 진행")
+        print("❌ 조건 미충족으로 꼬리질문 생성하지 않음")
+        return Response({
+            'followup': False,
+            'matched_keywords': matched_keywords,
+            'reason': 'user_answer에 핵심 키워드가 충분히 포함되지 않았습니다.'
+        })
 
     # 2. Claude 프롬프트 구성 및 질문 생성
     prompt = f"""

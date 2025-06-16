@@ -81,8 +81,7 @@ async def transcribe_ws(websocket: WebSocket, email: str = Query(...), question_
         except Exception as e:
             print("❗ send_audio 예외 발생:", e)
         finally:
-            await stream.input_stream.end_stream()
-            print("오디오 전송 종료 및 Transcribe 종료 요청")
+            print("오디오 전송 종료")
 
     async def handle_transcription():
         nonlocal transcript_text
@@ -105,7 +104,10 @@ async def transcribe_ws(websocket: WebSocket, email: str = Query(...), question_
         if email not in upload_id_cache:
             upload_id_cache[email] = get_upload_id(email_prefix)
         upload_id = upload_id_cache[email]
-        await asyncio.gather(send_audio(), handle_transcription())
+        
+        await send_audio()
+        await stream.input_stream.end_stream()
+        await handle_transcription()
     except Exception as e:
         print("🔥 전사 실패:", e)
     finally:
@@ -251,6 +253,7 @@ async def refine_transcript_with_claude(transcript_text: str) -> str:
 - "디 비 에스" → "DBS"
 
 단, 발음이 숫자나 영어를 뜻하는 경우에만 변환하세요.
+그리고 이름, 지명, 고유명사는 가능한 한 그대로 유지하세요. 의미가 명확하지 않으면 원문을 보존하세요.
 
 [전사 시작]
 {transcript_text}

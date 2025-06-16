@@ -50,6 +50,7 @@ def get_secret_hash(username):
 
 
 # 📝 회원가입 API
+@csrf_exempt
 @api_view(['POST'])
 def signup(request):
     email = request.data.get('email')

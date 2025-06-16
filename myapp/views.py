@@ -1123,3 +1123,46 @@ def get_ordered_question_audio(request):
     results = list(filter(None, parsed))
     results = sorted(results, key=lambda x: x["order"])
     return Response(results)
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def end_interview_session(request):
+    interview_id= request.data.get('interview_id')
+    if not interview_id:
+        return Response({'error': 'interview_id는 필수입니다.'}, status=400)
+
+    email_prefix = request.user.email.split('@')[0]
+
+    # 삭제할 버킷들
+    targets = [
+        (settings.AWS_FOLLOWUP_QUESTION_BUCKET_NAME, f"{email_prefix}/{interview_id}/"),
+        (settings.AWS_AUDIO_BUCKET_NAME, f"{email_prefix}/{interview_id}/"),
+        (settings.AWS_CLIP_VIDEO_BUCKET_NAME, f"clips/{email_prefix}/{interview_id}_"),
+        (settings.AWS_FULL_VIDEO_BUCKET_NAME, f"videos/{email_prefix}/{interview_id}.webm"),
+        # 추가적으로 필요한 경로들
+    ]
+
+    s3 = boto3.client('s3',
+                      aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
+                      aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
+                      region_name=settings.AWS_S3_REGION_NAME)
+
+    deleted_files = []
+
+    for bucket, prefix in targets:
+        if prefix.endswith('.webm'):  # 단일 파일
+            try:
+                s3.delete_object(Bucket=bucket, Key=prefix)
+                deleted_files.append(prefix)
+            except Exception as e:
+                print(f"❌ 단일 파일 삭제 실패: {prefix} → {e}")
+        else:
+            response = s3.list_objects_v2(Bucket=bucket, Prefix=prefix)
+            for obj in response.get('Contents', []):
+                s3.delete_object(Bucket=bucket, Key=obj['Key'])
+                deleted_files.append(obj['Key'])
+
+    return Response({
+        'message': '면접 세션 종료 및 데이터 정리 완료',
+        'deleted': deleted_files
+    })

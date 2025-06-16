@@ -704,7 +704,8 @@ def decide_followup_question(request):
     matched_keywords = [kw for kw in keywords if kw in user_answer]
 
     if not should_generate:
-        return Response({'followup': False, 'matched_keywords': matched_keywords})
+       return Response({'followup': False, 'matched_keywords': matched_keywords})
+    print("⚠️ 키워드 조건 무시하고 follow-up 질문 생성 강제 진행")
 
     # 2. Claude 프롬프트 구성 및 질문 생성
     prompt = f"""
@@ -720,6 +721,8 @@ def decide_followup_question(request):
         return Response({'error': 'Claude 호출 실패', 'detail': str(e)}, status=500)
 
     # 3. 새로운 follow-up 질문 번호 지정
+    base_question_number = str(base_question_number)
+
     suffix_numbers = [
         int(q.split('-')[1])
         for q in existing_question_numbers
@@ -735,44 +738,30 @@ def decide_followup_question(request):
         aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY"),
     )
 
-    followup_bucket = settings.AWS_FOLLOWUP_QUESTION_BUCKET_NAME
-    s3_key = f"{interview_id}/{followup_question_number}.json"
+    email = request.user.email  # 인증된 유저의 이메일
+    username = email.split('@')[0]  # 'woco11@naver.com' → 'woco11'
 
-    question_data = {
-        "question_number": followup_question_number,
-        "question": question
-    }
+
+    followup_bucket = settings.AWS_FOLLOWUP_QUESTION_BUCKET_NAME
+    s3_key = f"{username}/{interview_id}/{followup_question_number}.txt"
+
 
     try:
         s3_client.put_object(
             Bucket=followup_bucket,
             Key=s3_key,
-            Body=json.dumps(question_data).encode('utf-8'),
-            ContentType='application/json'
+            Body=question.encode('utf-8'), 
+            ContentType='text/plain'
         )
     except Exception as e:
         return Response({'error': 'S3 저장 실패', 'detail': str(e)}, status=500)
-
-    # TTS 서버 호출
-    tts_url = "http://localhost:8001/api/generate-zonos/tts/"
-    try:
-        tts_response = requests.post(tts_url, json={
-            "question_number": followup_question_number,
-            "text": question
-        })
-        if tts_response.status_code != 200:
-            raise Exception(tts_response.text)
-        tts_result = tts_response.json()
-        audio_url = tts_result.get("file_url")
-    except Exception as e:
-        return Response({'error': 'TTS 호출 실패', 'detail': str(e)}, status=500)
 
     return Response({
         'followup': True,
         'question_number': followup_question_number,
         'question': question,
-        'audio_url': audio_url,
-        'matched_keywords': matched_keywords
+        'matched_keywords': matched_keywords,
+        's3_key': s3_key 
     })
 
 

@@ -7,8 +7,6 @@ from pydub import AudioSegment
 from myapp.utils.keyword_extractor import extract_resume_keywords
 from myapp.utils.followup_logic import should_generate_followup
 from myapp.utils.pdf import feedback_pdf_upload
-from myapp.utils.token_utils import decode_cognito_id_token
-from urllib.parse import quote 
 
 import requests
 import re
@@ -17,7 +15,6 @@ import boto3
 import hmac
 import hashlib
 import base64
-import uuid
 import tempfile
 import librosa
 import numpy as np
@@ -35,11 +32,7 @@ from .serializers import ResumeSerializer
 from django.http import JsonResponse
 from pathlib import Path
 from django.views.decorators.csrf import csrf_exempt
-from django.utils.decorators import method_decorator
 from django.http import FileResponse
-from datetime import timedelta
-from reportlab.pdfgen import canvas  # or your preferred PDF lib
-from reportlab.lib.pagesizes import A4
 
 # 🔐 SECRET_HASH 계산 함수 (Cognito)
 def get_secret_hash(username):

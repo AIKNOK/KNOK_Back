@@ -1,23 +1,7 @@
 from django.urls import path
-from .views import save_transcribed_text
 from . import views 
 from .views import (
-    signup,
-    confirm_email,
-    login,
-    logout_view,
-    ResumeUploadView,
-    ResumeDeleteView,
-    get_resume_view,
-    generate_resume_questions,
-    analyze_voice_api,
-    receive_posture_count,
     decide_followup_question,
-    AudioUploadView,
-    get_resume_text,
-    FullVideoUploadView,
-    extract_bad_posture_clips,
-    get_all_questions_view,
     generate_feedback_report,
     download_feedback_zip,
     send_to_slack,

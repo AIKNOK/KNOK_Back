@@ -378,7 +378,7 @@ def generate_resume_questions(request):
     print("📦 최종 질문 (고정 + 검증된 질문):", final_questions)
 
     for idx, question in enumerate(final_questions, start=1):
-        filename = f"{email_prefix}/질문{idx}.txt"
+        filename = f"{email_prefix}/questions{idx}.txt"
         s3.put_object(
             Bucket=bucket_out,
             Key=filename,

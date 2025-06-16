@@ -53,6 +53,7 @@ def get_secret_hash(username):
 
 
 # 📝 회원가입 API
+@csrf_exempt
 @api_view(['POST'])
 def signup(request):
     email = request.data.get('email')
@@ -253,6 +254,9 @@ def get_resume_view(request):
 def generate_resume_questions(request):
     user = request.user
     email_prefix = user.email.split('@')[0]
+    difficulty = request.data.get("difficulty", "중간")
+    print(f"💡 선택된 난이도: {difficulty}")
+
     bucket_in = settings.AWS_STORAGE_BUCKET_NAME  # 이력서가 있는 버킷
     bucket_out = 'resume-questions'               # 질문 저장용 버킷
 
@@ -289,6 +293,14 @@ def generate_resume_questions(request):
         text = "\n".join(page.extract_text() for page in reader.pages if page.extract_text())
 
     # Claude 프롬프트 생성
+     # ✅ 난이도별 지침 설정
+    difficulty_prompt = {
+        "쉬움": "부담 없이 답할 수 있는 질문을 만들어주세요. 자기소개, 간단한 경험 중심으로 해주세요.",
+        "중간": "기술, 프로젝트, 협업 상황에 대해 본인이 설명할 수 있는 수준의 구체적인 질문을 만들어주세요.",
+        "어려움": "한 가지 주제에 깊이 있게 질문해주세요. 예: 기술 선택 이유, 문제 해결 전략, 아키텍처 설계 판단 등. 한 문장에 여러 질문을 넣지 마세요. 사고력을 요하는 질문이어야 합니다."
+    }.get(difficulty, "")
+    
+    # ✅ Claude 프롬프트 생성 
     prompt = f"""
     다음은 이력서 내용입니다:
     {text}
@@ -299,14 +311,15 @@ def generate_resume_questions(request):
     - 질문 앞에 숫자나 '질문 1)', '1.', 'Q1' 등의 접두어는 절대 붙이지 마세요.
     - 그냥 질문 내용만 문장 형태로 자연스럽게 출력해주세요.
     - 줄바꿈으로 구분해 주세요.
-
+    - {difficulty_prompt}
+    
     예시 출력 형식:
     지원하신 직무와 관련해 가장 자신 있는 기술 스택은 무엇인가요?
     해당 기술을 활용해 문제를 해결했던 경험을 말씀해 주세요.
     팀 프로젝트에서 본인이 맡았던 역할과 해결한 기술적 문제는 무엇이었나요?
     """
 
-    # Claude 호출
+    # Claude 호출 (1차 질문 생성)
     client = boto3.client("bedrock-runtime", region_name="us-east-1")
     body = {
         "anthropic_version": "bedrock-2023-05-31",
@@ -325,9 +338,45 @@ def generate_resume_questions(request):
 
     # 질문 분리 후 S3에 저장
     questions = [line for line in content.strip().split('\n') if line.strip()]
-    
-    final_questions = ["간단히 자기소개 부탁드릴게요"] + questions[:3]
-    
+    print("🎤 Claude 생성 질문 (원본):", questions)
+
+    # ✅ Claude 검증 프롬프트 (고정 질문 제외)
+    verify_prompt = f"""
+이력서 내용과 아래 Claude가 생성한 면접 질문을 검토하세요.
+
+이력서:
+{text}
+
+면접 질문:
+{chr(10).join(questions)}
+
+요청:
+- 이력서와 관련 없는 질문은 제거하거나 수정해 주세요.
+- 관련성 있는 질문만 남기고, 질문 내용은 줄바꿈으로 구분해서 출력해 주세요.
+- 번호, 접두어 없이 질문만 출력하세요.
+"""
+    verify_body = {
+        "anthropic_version": "bedrock-2023-05-31",
+        "max_tokens": 512,
+        "temperature": 0.3,
+        "messages": [{"role": "user", "content": verify_prompt}]
+    }
+    verify_response = client.invoke_model(
+        modelId="anthropic.claude-3-haiku-20240307-v1:0",
+        contentType="application/json",
+        accept="application/json",
+        body=json.dumps(verify_body)
+    )
+    verify_result = json.loads(verify_response['body'].read())
+    verified_text = verify_result['content'][0]['text'] if verify_result.get("content") else ""
+    verified_questions = [line.strip() for line in verified_text.strip().split('\n') if line.strip()]
+    print("✅ Claude 검증 완료 질문:", verified_questions)
+
+
+    # 고정 질문
+    final_questions = ["간단히 자기소개 부탁드릴게요"] + verified_questions[:3]
+    print("📦 최종 질문 (고정 + 검증된 질문):", final_questions)
+
     for idx, question in enumerate(final_questions, start=1):
         filename = f"{email_prefix}/질문{idx}.txt"
         s3.put_object(
@@ -660,8 +709,19 @@ def decide_followup_question(request):
     should_generate = should_generate_followup(user_answer, keywords)
     matched_keywords = [kw for kw in keywords if kw in user_answer]
 
+    # 🔍 로그 출력
+    print("🧾 이력서 키워드:", keywords)
+    print("🗣️ 사용자 답변:", user_answer)
+    print("✅ 매칭된 키워드:", matched_keywords)
+    print("📌 follow-up 생성 여부:", should_generate)
+
     if not should_generate:
-        return Response({'followup': False, 'matched_keywords': matched_keywords})
+        print("❌ 조건 미충족으로 꼬리질문 생성하지 않음")
+        return Response({
+            'followup': False,
+            'matched_keywords': matched_keywords,
+            'reason': 'user_answer에 핵심 키워드가 충분히 포함되지 않았습니다.'
+        })
 
     # 2. Claude 프롬프트 구성 및 질문 생성
     prompt = f"""
@@ -677,6 +737,8 @@ def decide_followup_question(request):
         return Response({'error': 'Claude 호출 실패', 'detail': str(e)}, status=500)
 
     # 3. 새로운 follow-up 질문 번호 지정
+    base_question_number = str(base_question_number)
+
     suffix_numbers = [
         int(q.split('-')[1])
         for q in existing_question_numbers
@@ -692,41 +754,30 @@ def decide_followup_question(request):
         aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY"),
     )
 
-    followup_bucket = settings.AWS_FOLLOWUP_QUESTION_BUCKET_NAME
-    s3_key = f"{interview_id}/{followup_question_number}.json"
+    email = request.user.email  # 인증된 유저의 이메일
+    username = email.split('@')[0]  # 'woco11@naver.com' → 'woco11'
 
-    question_data = {
-        "question_number": followup_question_number,
-        "question": question
-    }
+
+    followup_bucket = settings.AWS_FOLLOWUP_QUESTION_BUCKET_NAME
+    s3_key = f"{username}/{interview_id}/{followup_question_number}.txt"
+
 
     try:
         s3_client.put_object(
             Bucket=followup_bucket,
             Key=s3_key,
-            Body=json.dumps(question_data).encode('utf-8'),
-            ContentType='application/json'
+            Body=question.encode('utf-8'), 
+            ContentType='text/plain'
         )
     except Exception as e:
         return Response({'error': 'S3 저장 실패', 'detail': str(e)}, status=500)
-
-    # 5. Polly로 음성 생성 및 저장
-    try:
-        tts_key = f"tts_outputs/{email_prefix}/질문{followup_question_number}.mp3"
-        audio_url = synthesize_speech_and_upload_to_s3(
-            text=question,
-            bucket_name=settings.AWS_TTS_BUCKET_NAME,
-            key=tts_key
-        )
-    except Exception as e:
-        return Response({'error': 'Polly 호출 실패', 'detail': str(e)}, status=500)
 
     return Response({
         'followup': True,
         'question_number': followup_question_number,
         'question': question,
-        'audio_url': audio_url,
-        'matched_keywords': matched_keywords
+        'matched_keywords': matched_keywords,
+        's3_key': s3_key 
     })
 
 
@@ -1237,4 +1288,45 @@ def synthesize_speech_and_upload_to_s3(text, bucket_name, key):
     s3.upload_file(temp_file_path, bucket_name, key, ExtraArgs={"ContentType": "audio/mpeg"})
     os.remove(temp_file_path)
 
-    return f"https://{bucket_name}.s3.{settings.AWS_S3_REGION_NAME}.amazonaws.com/{key}"
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def end_interview_session(request):
+    interview_id= request.data.get('interview_id')
+    if not interview_id:
+        return Response({'error': 'interview_id는 필수입니다.'}, status=400)
+
+    email_prefix = request.user.email.split('@')[0]
+
+    # 삭제할 버킷들
+    targets = [
+        (settings.AWS_FOLLOWUP_QUESTION_BUCKET_NAME, f"{email_prefix}/{interview_id}/"),
+        (settings.AWS_AUDIO_BUCKET_NAME, f"{email_prefix}/{interview_id}/"),
+        (settings.AWS_CLIP_VIDEO_BUCKET_NAME, f"clips/{email_prefix}/{interview_id}_"),
+        (settings.AWS_FULL_VIDEO_BUCKET_NAME, f"videos/{email_prefix}/{interview_id}.webm"),
+        # 추가적으로 필요한 경로들
+    ]
+
+    s3 = boto3.client('s3',
+                      aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
+                      aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
+                      region_name=settings.AWS_S3_REGION_NAME)
+
+    deleted_files = []
+
+    for bucket, prefix in targets:
+        if prefix.endswith('.webm'):  # 단일 파일
+            try:
+                s3.delete_object(Bucket=bucket, Key=prefix)
+                deleted_files.append(prefix)
+            except Exception as e:
+                print(f"❌ 단일 파일 삭제 실패: {prefix} → {e}")
+        else:
+            response = s3.list_objects_v2(Bucket=bucket, Prefix=prefix)
+            for obj in response.get('Contents', []):
+                s3.delete_object(Bucket=bucket, Key=obj['Key'])
+                deleted_files.append(obj['Key'])
+
+    return Response({
+        'message': '면접 세션 종료 및 데이터 정리 완료',
+        'deleted': deleted_files
+    })

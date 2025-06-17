@@ -404,7 +404,7 @@ AI가 생성한 질문:
     }
     try:
         tts_response = requests.post(
-            "http://43.201.0.76:8002/api/generate-resume-question/",
+            "http://54.180.240.216:8002/api/generate-resume-question/",
             headers=headers,
             timeout=30
         )

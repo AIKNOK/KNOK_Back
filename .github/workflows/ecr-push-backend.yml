@@ -1,17 +1,18 @@
-name: Build & Push Docker image to ECR
+name: Build & Push Django Backend
 
 on:
   push:
-    branches:
-      - main
+    paths:
+      - "backend/**"
+      - "Dockerfile.backend"
+      - "requirements.txt"
 
 jobs:
   build-and-push:
-    name: Build and Push to ECR
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
+      - name: Checkout code
         uses: actions/checkout@v4
 
       - name: Configure AWS credentials
@@ -21,15 +22,14 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ secrets.AWS_REGION }}
 
-      - name: Login to Amazon ECR
+      - name: Login to ECR
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v1
 
-      - name: Build, Tag, and Push Docker image
+      - name: Build & Push Django image
         env:
           ECR_REPOSITORY: ${{ secrets.ECR_REPOSITORY }}
-          IMAGE_TAG: ${{ github.sha }}
+          IMAGE_TAG: backend-${{ github.sha }}
         run: |
-          docker build -t $ECR_REPOSITORY:latest -t $ECR_REPOSITORY:$IMAGE_TAG .
-          docker push $ECR_REPOSITORY:latest
+          docker build -f Dockerfile.backend -t $ECR_REPOSITORY:$IMAGE_TAG .
           docker push $ECR_REPOSITORY:$IMAGE_TAG

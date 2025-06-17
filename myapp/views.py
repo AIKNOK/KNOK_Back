@@ -404,7 +404,7 @@ AI가 생성한 질문:
     }
     try:
         tts_response = requests.post(
-            "http://43.201.0.76:8002/api/generate-resume-question/",
+            "http://54.180.240.216:8002/api/generate-resume-question/",
             headers=headers,
             timeout=30
         )
@@ -420,6 +420,9 @@ AI가 생성한 질문:
 
 
 # Claude 3 호출 함수 추가
+
+
+
 def get_claude_feedback(prompt: str) -> str:
     print(">> get_claude_feedback received:", prompt)
     
@@ -1531,7 +1534,7 @@ def decide_resume_question(request):
         "Authorization": f"Bearer {token}"
     }
 
-    tts_url = "http://43.201.0.76:8002/api/generate-followup-question/tts/"
+    tts_url = "http://54.180.240.216:8002/api/generate-followup-question/tts/"
     try:
         # 외부 POST 요청 (body 없음)
         tts_response = requests.post(tts_url, headers=headers)

@@ -1,26 +1,13 @@
 from django.urls import path
-from .views import save_transcribed_text
 from . import views 
 from .views import (
-    signup,
-    confirm_email,
-    login,
-    logout_view,
-    ResumeUploadView,
-    ResumeDeleteView,
-    get_resume_view,
-    generate_resume_questions,
-    analyze_voice_api,
-    receive_posture_count,
     decide_followup_question,
-    AudioUploadView,
-    get_resume_text,
-    FullVideoUploadView,
-    extract_bad_posture_clips,
-    get_all_questions_view,
     generate_feedback_report,
     decide_resume_question,
     get_ordered_question_audio,
+    download_feedback_zip,
+    send_to_slack,
+
 )
 
 urlpatterns = [
@@ -49,8 +36,21 @@ urlpatterns = [
     path('questions/audio/', views.get_ordered_question_audio, name='get_ordered_question_audio'),
     path('transcript/', views.save_transcribed_text, name='save_transcribed_text'),
 
+    # 피드백 다운로드
+    path('video/download-zip/', download_feedback_zip),
+ 
+    # ✅ 추가: 프론트에서 요청하는 경로에 맞춤
+    path('interview/feedback/generate/', generate_feedback_report, name='generate_feedback'),
+
     # ✅ 피드백 리포트 & 꼬리 질문
     path('interview/feedback/generate/', views.generate_feedback_report, name='generate_feedback'),
     path('followup/check/', views.decide_followup_question, name='followup_check'),
+
     path('resume/tts/', decide_resume_question, name='resume_check'),
-]
+
+    
+    # slack 문의
+    path('contact/', send_to_slack, name='send_to_slack'),
+
+    # ❓ 꼬리 질문 여부 판단
+    path('followup/check/', decide_followup_question, name='followup_check'),

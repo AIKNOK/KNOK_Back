@@ -19,6 +19,8 @@ from .views import (
     extract_bad_posture_clips,
     get_all_questions_view,
     generate_feedback_report,
+    decide_resume_question,
+    get_ordered_question_audio,
 )
 
 urlpatterns = [
@@ -50,4 +52,5 @@ urlpatterns = [
     # ✅ 피드백 리포트 & 꼬리 질문
     path('interview/feedback/generate/', views.generate_feedback_report, name='generate_feedback'),
     path('followup/check/', views.decide_followup_question, name='followup_check'),
+    path('resume/tts/', decide_resume_question, name='resume_check'),
 ]

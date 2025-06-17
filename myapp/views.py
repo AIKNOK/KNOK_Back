@@ -6,8 +6,6 @@ from rest_framework.decorators import authentication_classes, permission_classes
 from pydub import AudioSegment
 from myapp.utils.keyword_extractor import extract_resume_keywords
 from myapp.utils.followup_logic import should_generate_followup
-from myapp.utils.token_utils import decode_cognito_id_token
-from urllib.parse import quote 
 
 import requests
 import re
@@ -16,7 +14,6 @@ import boto3
 import hmac
 import hashlib
 import base64
-import uuid
 import tempfile
 import librosa
 import numpy as np
@@ -26,6 +23,7 @@ import PyPDF2
 import moviepy.editor as mp
 import subprocess
 import os
+import traceback
 
 from django.conf import settings
 from .models import Resume
@@ -33,10 +31,7 @@ from .serializers import ResumeSerializer
 from django.http import JsonResponse
 from pathlib import Path
 from django.views.decorators.csrf import csrf_exempt
-from django.utils.decorators import method_decorator
-from datetime import datetime
-from reportlab.pdfgen import canvas  # or your preferred PDF lib
-from reportlab.lib.pagesizes import A4
+from django.http import FileResponse
 
 # 🔐 SECRET_HASH 계산 함수 (Cognito)
 def get_secret_hash(username):
@@ -375,7 +370,7 @@ def generate_resume_questions(request):
     print("📦 최종 질문 (고정 + 검증된 질문):", final_questions)
 
     for idx, question in enumerate(final_questions, start=1):
-        filename = f"{email_prefix}/질문{idx}.txt"
+        filename = f"{email_prefix}/questions{idx}.txt"
         s3.put_object(
             Bucket=bucket_out,
             Key=filename,
@@ -689,6 +684,14 @@ def receive_posture_count(request):
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def decide_followup_question(request):
+    auth_header = request.headers.get('Authorization', '')
+    if not auth_header.startswith('Bearer '):
+        return Response({'error': 'Authorization 헤더가 없습니다.'}, status=401)
+    
+    token = auth_header.replace('Bearer ', '', 1).strip()
+    headers = {
+        "Authorization": f"Bearer {token}"
+    }
     resume_text = request.data.get('resume_text')
     user_answer = request.data.get('user_answer')
     base_question_number = request.data.get('base_question_number')
@@ -704,19 +707,8 @@ def decide_followup_question(request):
     should_generate = should_generate_followup(user_answer, keywords)
     matched_keywords = [kw for kw in keywords if kw in user_answer]
 
-    # 🔍 로그 출력
-    print("🧾 이력서 키워드:", keywords)
-    print("🗣️ 사용자 답변:", user_answer)
-    print("✅ 매칭된 키워드:", matched_keywords)
-    print("📌 follow-up 생성 여부:", should_generate)
-
     if not should_generate:
-        print("❌ 조건 미충족으로 꼬리질문 생성하지 않음")
-        return Response({
-            'followup': False,
-            'matched_keywords': matched_keywords,
-            'reason': 'user_answer에 핵심 키워드가 충분히 포함되지 않았습니다.'
-        })
+        return Response({'followup': False, 'matched_keywords': matched_keywords})
 
     # 2. Claude 프롬프트 구성 및 질문 생성
     prompt = f"""
@@ -732,8 +724,6 @@ def decide_followup_question(request):
         return Response({'error': 'Claude 호출 실패', 'detail': str(e)}, status=500)
 
     # 3. 새로운 follow-up 질문 번호 지정
-    base_question_number = str(base_question_number)
-
     suffix_numbers = [
         int(q.split('-')[1])
         for q in existing_question_numbers
@@ -749,30 +739,46 @@ def decide_followup_question(request):
         aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY"),
     )
 
-    email = request.user.email  # 인증된 유저의 이메일
-    username = email.split('@')[0]  # 'woco11@naver.com' → 'woco11'
-
-
     followup_bucket = settings.AWS_FOLLOWUP_QUESTION_BUCKET_NAME
-    s3_key = f"{username}/{interview_id}/{followup_question_number}.txt"
+    s3_key = f"{interview_id}/{followup_question_number}.json"
 
+    question_data = {
+        "question_number": followup_question_number,
+        "question": question
+    }
 
     try:
         s3_client.put_object(
             Bucket=followup_bucket,
             Key=s3_key,
-            Body=question.encode('utf-8'), 
-            ContentType='text/plain'
+            Body=json.dumps(question_data).encode('utf-8'),
+            ContentType='application/json'
         )
     except Exception as e:
         return Response({'error': 'S3 저장 실패', 'detail': str(e)}, status=500)
+
+    # TTS 서버 호출
+    tts_url = "http://13.124.226.197:8002/api/generate-followup-question/tts/"
+    try:
+        tts_response = requests.post(tts_url, json={
+            "question_number": followup_question_number,
+            "text": question
+        },
+        headers=headers
+        )
+        if tts_response.status_code != 200:
+            raise Exception(tts_response.text)
+        tts_result = tts_response.json()
+        audio_url = tts_result.get("file_url")
+    except Exception as e:
+        return Response({'error': 'TTS 호출 실패', 'detail': str(e)}, status=500)
 
     return Response({
         'followup': True,
         'question_number': followup_question_number,
         'question': question,
-        'matched_keywords': matched_keywords,
-        's3_key': s3_key 
+        'audio_url': audio_url,
+        'matched_keywords': matched_keywords
     })
 
 
@@ -918,15 +924,14 @@ class FullVideoUploadView(APIView):
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def extract_bad_posture_clips(request):
-    import traceback
-
     try:
         print("[🔍 segments 수신 내용]", request.data.get("segments"))
         video_id = request.data.get("videoId")
         segments = request.data.get("segments")
-        feedback_text = request.data.get("feedback_text", "면접 분석 피드백 PDF 예시입니다.")  # 프론트에서 분석문 전달하면 여기에
-        if not video_id or not segments:
-            return Response({"error": "videoId, segments 필수"}, status=400)
+        feedbacks = request.data.get("feedbacks")
+
+        if not video_id or not segments or not feedbacks:
+            return Response({"error": "videoId, segments, feedbacks 필수"}, status=400)
 
         email_prefix = request.user.email.split('@')[0]
         video_key = f"videos/{email_prefix}/{video_id}.webm"
@@ -938,25 +943,25 @@ def extract_bad_posture_clips(request):
             aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
             region_name=settings.AWS_S3_REGION_NAME
         )
+
         full_video_temp = tempfile.NamedTemporaryFile(delete=False, suffix=".webm")
         s3.download_fileobj(settings.AWS_FULL_VIDEO_BUCKET_NAME, video_key, full_video_temp)
         full_video_temp.close()
 
-        # webm → mp4 변환 (MoviePy 지원용)
+        # webm → mp4 변환
         converted_video_path = convert_webm_to_mp4(full_video_temp.name)
         video = mp.VideoFileClip(converted_video_path)
-        clip_urls = []
-        duration = video.duration  # 전체 길이(초) 구하기
+        duration = video.duration
+
+        results = []
 
         for idx, segment in enumerate(segments):
-            # 시작/끝을 float로 파싱 & 음수 방지, 끝은 전체 길이 넘지 않게
             try:
                 start = max(0.0, float(segment["start"]))
                 end   = min(duration, float(segment["end"]))
             except Exception as e:
                 return Response({"error": f"start/end 변환 실패: {str(e)}"}, status=400)
 
-            # 유효 구간이 아니면 건너뛰기
             if end <= start:
                 continue
 
@@ -965,9 +970,8 @@ def extract_bad_posture_clips(request):
             clip_path = tempfile.NamedTemporaryFile(delete=False, suffix=f"_clip_{idx+1}.mp4").name
             clip.write_videofile(clip_path, codec="libx264", audio_codec="aac", logger=None)
 
-            # S3 업로드
+            # 클립 업로드
             clip_s3_key = f"clips/{email_prefix}/{video_id}_clip_{idx+1}.mp4"
-
             s3.upload_file(
                 clip_path,
                 settings.AWS_CLIP_VIDEO_BUCKET_NAME,
@@ -975,17 +979,42 @@ def extract_bad_posture_clips(request):
                 ExtraArgs={"ContentType": "video/mp4"}
             )
 
-            # 업로드 URL 생성성
-            clip_url = f"https://{settings.AWS_CLIP_VIDEO_BUCKET_NAME}.s3.{settings.AWS_S3_REGION_NAME}.amazonaws.com/{clip_s3_key}"
-            clip_urls.append(clip_url)
+            # 썸네일 생성 및 업로드
+            thumbnail_path = tempfile.NamedTemporaryFile(delete=False, suffix=".jpg").name
+            clip.save_frame(thumbnail_path, t=(end - start) / 2)
+            thumbnail_s3_key = f"thumbnails/{email_prefix}/{video_id}_thumb_{idx+1}.jpg"
+            s3.upload_file(
+                thumbnail_path,
+                settings.AWS_CLIP_VIDEO_BUCKET_NAME,
+                thumbnail_s3_key,
+                ExtraArgs={"ContentType": "image/jpeg"}
+            )
+
+            # presigned URL 생성
+            clip_url = s3.generate_presigned_url(
+                'get_object',
+                Params={'Bucket': settings.AWS_CLIP_VIDEO_BUCKET_NAME, 'Key': clip_s3_key},
+                ExpiresIn=60 * 60
+            )
+            thumbnail_url = s3.generate_presigned_url(
+                'get_object',
+                Params={'Bucket': settings.AWS_CLIP_VIDEO_BUCKET_NAME, 'Key': thumbnail_s3_key},
+                ExpiresIn=60 * 60
+            )
+
+            results.append({
+                "clipUrl": clip_url,
+                "thumbnailUrl": thumbnail_url,
+                "feedback": feedbacks[idx] if idx < len(feedbacks) else ""
+            })
 
         return Response({
             "message": "클립 저장 완료",
-            "clips": clip_urls
+            "clips": results,
         })
 
     except Exception as e:
-        print("🔥 클립 zip 추출 예외:", traceback.format_exc())
+        print("🔥 클립 추출 예외:", traceback.format_exc())
         return Response({"error": str(e)}, status=500)
 
 def convert_webm_to_mp4(input_path):
@@ -1073,6 +1102,216 @@ def get_all_questions_view(request):
 
     return Response({"questions": sorted_merged})
   
+def get_interview_question_audio_list(request):
+    email = request.user.email
+    email_prefix = email.split('@')[0]
+
+    interview_id = request.query_params.get('interview_id')  # e.g., "0614-2"
+    if not interview_id:
+        return Response({'error': 'interview_id 파라미터가 필요합니다.'}, status=400)
+
+    bucket_name = settings.AWS_TTS_BUCKET_NAME
+    prefix = f"tts_outputs/{email_prefix}/{interview_id}/"
+
+    s3 = boto3.client('s3',
+                      aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
+                      aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
+                      region_name=settings.AWS_S3_REGION_NAME)
+
+    try:
+        response = s3.list_objects_v2(Bucket=bucket_name, Prefix=prefix)
+    except Exception as e:
+        return Response({'error': 'S3 접근 실패', 'detail': str(e)}, status=500)
+
+    if 'Contents' not in response:
+        return Response([], status=200)
+
+    audio_files = [obj['Key'] for obj in response['Contents'] if obj['Key'].endswith('.mp3')]
+
+    def parse_question_info(file_name):
+        file_stem = os.path.splitext(os.path.basename(file_name))[0]
+        match = re.match(r"질문(\d+(?:-\d+)?)", file_stem)
+        return match.group(1) if match else None
+
+    def sort_key(file_name):
+        number = parse_question_info(file_name)
+        if not number:
+            return (float('inf'),)
+        return tuple(int(part) for part in number.split('-'))
+
+    audio_files.sort(key=sort_key)
+
+    result = []
+    for file_key in audio_files:
+        number = parse_question_info(file_key)
+        if not number:
+            continue
+
+        parent_number = number.split("-")[0] if "-" in number else None
+
+        result.append({
+            "question_number": number,
+            "parent_number": parent_number,
+            "audio_url": f"https://{bucket_name}.s3.{settings.AWS_S3_REGION_NAME}.amazonaws.com/{file_key}"
+        })
+
+    return Response(result, status=200)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def download_feedback_zip(request):
+    """
+    클립 + 리포트 PDF가 있는 S3 경로의 파일들을 ZIP으로 묶어 반환
+    """
+    import zipfile
+    import tempfile
+    import os
+
+    email_prefix = request.user.email.split('@')[0]
+    video_id = request.data.get("videoId")
+    if not video_id:
+        return Response({"error": "videoId는 필수입니다."}, status=400)
+
+    prefix = f"clips/{email_prefix}/{video_id}_"
+    bucket = settings.AWS_CLIP_VIDEO_BUCKET_NAME
+    s3 = boto3.client('s3')
+
+    # ✅ prefix로 S3 객체 목록 조회
+    objects = s3.list_objects_v2(Bucket=bucket, Prefix=f"clips/{email_prefix}/")
+    if 'Contents' not in objects:
+        return Response({"error": "해당 경로에 파일이 없습니다."}, status=404)
+
+    target_keys = [
+        obj['Key']
+        for obj in objects['Contents']
+        if obj['Key'].startswith(prefix) and (obj['Key'].endswith('.mp4') or obj['Key'].endswith('.pdf'))
+    ]
+
+    if not target_keys:
+        return Response({"error": "클립 또는 PDF 파일이 없습니다."}, status=404)
+
+    # ✅ zip 파일을 임시로 생성
+    tmp_zip = tempfile.NamedTemporaryFile(delete=False, suffix=".zip")
+    zip_path = tmp_zip.name
+    tmp_zip.close()
+
+    with zipfile.ZipFile(zip_path, 'w') as zipf:
+        for key in target_keys:
+            local_path = tempfile.NamedTemporaryFile(delete=False).name
+            s3.download_file(bucket, key, local_path)
+            zipf.write(local_path, arcname=os.path.basename(key))
+            os.remove(local_path)  # 임시 다운로드 파일 제거
+
+    
+    if not os.path.exists(zip_path):
+        print("❌ ZIP 파일 생성 실패:", zip_path)
+        return Response({"error": "ZIP 파일이 존재하지 않습니다."}, status=500)
+
+    response = FileResponse(open(zip_path, 'rb'), as_attachment=True, filename=os.path.basename(zip_path))
+    response['Content-Type'] = 'application/zip'
+    return response
+
+    
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def generate_feedback_pdf_view(request):
+    try:
+        video_id = request.data.get("videoId")
+        feedback_text = request.data.get("feedback_text")
+        if not video_id or not feedback_text:
+            return Response({"error": "videoId, feedback_text 필수"}, status=400)
+
+        email_prefix = request.user.email.split('@')[0]
+        pdf_url = feedback_pdf_upload(email_prefix, video_id)
+        return Response({"pdf_url": pdf_url})
+
+    except Exception as e:
+        import traceback
+        print("🔥 피드백 PDF 생성 예외:", traceback.format_exc())
+        return Response({"error": str(e)}, status=500)
+
+SLACK_WEBHOOK_URL = "https://hooks.slack.com/services/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"
+
+@csrf_exempt
+def send_to_slack(request):
+    if request.method == "POST":
+        try:
+            print("요청 수신됨")
+            print("request.body:", request.body)
+
+            data = json.loads(request.body)
+            name = data.get("name", "이름 없음")
+            email = data.get("email", "이메일 없음")
+            message = data.get("message", "내용 없음")
+
+            slack_data = {
+                "text": f"📩 *새 문의가 도착했습니다!*\n\n👤 이름: {name}\n📧 이메일: {email}\n📝 내용: {message}"
+            }
+
+            response = requests.post(
+                SLACK_WEBHOOK_URL,
+                json=slack_data,
+                headers={"Content-Type": "application/json"}
+            )
+
+            print("슬랙 응답 코드:", response.status_code)
+            print("슬랙 응답 내용:", response.text)
+
+            if response.status_code == 200:
+                return JsonResponse({"success": True})
+            else:
+                return JsonResponse({"success": False, "error": response.text}, status=500)
+
+        except Exception as e:
+            print("예외 발생:")
+            traceback.print_exc()
+            return JsonResponse({"success": False, "error": str(e)}, status=500)
+
+    return JsonResponse({"error": "POST 요청만 지원됩니다."}, status=400)
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def end_interview_session(request):
+    interview_id= request.data.get('interview_id')
+    if not interview_id:
+        return Response({'error': 'interview_id는 필수입니다.'}, status=400)
+
+    email_prefix = request.user.email.split('@')[0]
+
+    # 삭제할 버킷들
+    targets = [
+        (settings.AWS_FOLLOWUP_QUESTION_BUCKET_NAME, f"{email_prefix}/{interview_id}/"),
+        (settings.AWS_AUDIO_BUCKET_NAME, f"{email_prefix}/{interview_id}/"),
+        (settings.AWS_CLIP_VIDEO_BUCKET_NAME, f"clips/{email_prefix}/{interview_id}_"),
+        (settings.AWS_FULL_VIDEO_BUCKET_NAME, f"videos/{email_prefix}/{interview_id}.webm"),
+        # 추가적으로 필요한 경로들
+    ]
+
+    s3 = boto3.client('s3',
+                      aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
+                      aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
+                      region_name=settings.AWS_S3_REGION_NAME)
+
+    deleted_files = []
+
+    for bucket, prefix in targets:
+        if prefix.endswith('.webm'):  # 단일 파일
+            try:
+                s3.delete_object(Bucket=bucket, Key=prefix)
+                deleted_files.append(prefix)
+            except Exception as e:
+                print(f"❌ 단일 파일 삭제 실패: {prefix} → {e}")
+        else:
+            response = s3.list_objects_v2(Bucket=bucket, Prefix=prefix)
+            for obj in response.get('Contents', []):
+                s3.delete_object(Bucket=bucket, Key=obj['Key'])
+                deleted_files.append(obj['Key'])
+
+    return Response({
+        'message': '면접 세션 종료 및 데이터 정리 완료',
+        'deleted': deleted_files
+    })
 # TTS 음성파일 가져오기
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
@@ -1124,3 +1363,40 @@ def get_ordered_question_audio(request):
     results = list(filter(None, parsed))
     results = sorted(results, key=lambda x: x["order"])
     return Response(results)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def decide_resume_question(request):
+    auth_header = request.headers.get('Authorization', '')
+    if not auth_header.startswith('Bearer '):
+        return Response({'error': 'Authorization 헤더가 없습니다.'}, status=401)
+    
+    token = auth_header.replace('Bearer ', '', 1).strip()
+    headers = {
+        "Authorization": f"Bearer {token}"
+    }
+
+    tts_url = "http://13.124.226.197:8002/api/generate-followup-question/tts/"
+    try:
+        # 외부 POST 요청 (body 없음)
+        tts_response = requests.post(tts_url, headers=headers)
+
+        # 응답 상태 코드 확인
+        if tts_response.status_code != 200:
+            return Response({
+                "error": "Resume TTS 생성 실패",
+                "detail": tts_response.json()
+            }, status=tts_response.status_code)
+
+        # 성공 응답 반환
+        return Response({
+            "message": "Resume TTS 호출 성공",
+            "result": tts_response.json()
+        }, status=200)
+
+    except requests.exceptions.RequestException as e:
+        return Response({
+            "error": "Resume TTS 호출 중 예외 발생",
+            "detail": str(e)
+        }, status=500)

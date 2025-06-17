@@ -104,6 +104,11 @@ async def transcribe_ws(websocket: WebSocket, email: str = Query(...), question_
         if email not in upload_id_cache:
             upload_id_cache[email] = get_upload_id(email_prefix)
         upload_id = upload_id_cache[email]
+        # 클라이언트에 upload_id 전송
+        await websocket.send_text(json.dumps({
+            "type":      "upload_id",
+            "upload_id": upload_id
+        }))
         
         await send_audio()
         await stream.input_stream.end_stream()

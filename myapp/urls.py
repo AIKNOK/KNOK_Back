@@ -3,8 +3,11 @@ from . import views
 from .views import (
     decide_followup_question,
     generate_feedback_report,
+    decide_resume_question,
+    get_ordered_question_audio,
     download_feedback_zip,
     send_to_slack,
+
 )
 
 urlpatterns = [
@@ -42,11 +45,12 @@ urlpatterns = [
     # ✅ 피드백 리포트 & 꼬리 질문
     path('interview/feedback/generate/', views.generate_feedback_report, name='generate_feedback'),
     path('followup/check/', views.decide_followup_question, name='followup_check'),
+
+    path('resume/tts/', decide_resume_question, name='resume_check'),
+
     
     # slack 문의
     path('contact/', send_to_slack, name='send_to_slack'),
 
     # ❓ 꼬리 질문 여부 판단
     path('followup/check/', decide_followup_question, name='followup_check'),
-
-]

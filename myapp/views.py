@@ -909,7 +909,7 @@ def decide_followup_question(request):
         return Response({'error': 'S3 저장 실패', 'detail': str(e)}, status=500)
 
     # TTS 서버 호출
-    tts_url = "http://13.124.226.197:8002/api/generate-followup-question/tts/"
+    tts_url = "http://43.201.0.76:8002/api/generate-followup-question/tts/"
     try:
         tts_response = requests.post(tts_url, json={
             "question_number": followup_question_number,
@@ -1262,7 +1262,7 @@ def get_interview_question_audio_list(request):
         return Response({'error': 'interview_id 파라미터가 필요합니다.'}, status=400)
 
     bucket_name = settings.AWS_TTS_BUCKET_NAME
-    prefix = f"tts_outputs/{email_prefix}/{interview_id}/"
+    prefix = f"{email_prefix}/{interview_id}/"
 
     s3 = boto3.client('s3',
                       aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
@@ -1473,7 +1473,7 @@ def get_ordered_question_audio(request):
     user = request.user
     email_prefix = user.email.split('@')[0]
     bucket = settings.AWS_TTS_BUCKET_NAME
-    prefix = f'tts_outputs/{email_prefix}/'
+    prefix = f'{email_prefix}/'
     #
     s3 = boto3.client(
         's3',
@@ -1531,7 +1531,7 @@ def decide_resume_question(request):
         "Authorization": f"Bearer {token}"
     }
 
-    tts_url = "http://13.124.226.197:8002/api/generate-followup-question/tts/"
+    tts_url = "http://43.201.0.76:8002/api/generate-followup-question/tts/"
     try:
         # 외부 POST 요청 (body 없음)
         tts_response = requests.post(tts_url, headers=headers)

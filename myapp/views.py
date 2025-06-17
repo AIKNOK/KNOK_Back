@@ -394,6 +394,27 @@ AI가 생성한 질문:
             ContentType='text/plain'
         )
 
+    auth_header = request.headers.get('Authorization', '')
+    if not auth_header.startswith('Bearer '):
+        return Response({'error': 'Authorization 헤더가 없습니다.'}, status=401)
+    
+    token = auth_header.replace('Bearer ', '', 1).strip()
+    headers = {
+        "Authorization": f"Bearer {token}"
+    }
+    try:
+        tts_response = requests.post(
+            "http://43.201.0.76:8002/api/generate-resume-question/",
+            headers=headers,
+            timeout=30
+        )
+        if tts_response.status_code != 200:
+            print("❌ TTS 생성 실패:", tts_response.text)
+        else:
+            print("✅ TTS 생성 완료")
+    except Exception as e:
+        print("❗ TTS 호출 중 예외 발생:", e)
+
     return Response({"message": "질문 저장 완료", "questions": final_questions})
 
 

@@ -54,3 +54,5 @@ urlpatterns = [
 
     # ❓ 꼬리 질문 여부 판단
     path('followup/check/', decide_followup_question, name='followup_check'),
+
+]

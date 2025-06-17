@@ -6,6 +6,7 @@ from .views import (
     decide_resume_question,
     get_ordered_question_audio,
     download_feedback_zip,
+    upload_feedback_pdf,
     send_to_slack,
 
 )
@@ -37,8 +38,11 @@ urlpatterns = [
     path('transcript/', views.save_transcribed_text, name='save_transcribed_text'),
 
     # 피드백 다운로드
-    path('video/download-zip/', download_feedback_zip),
- 
+    path('download/feedback-zip/', download_feedback_zip, name='download-feedback-zip'),
+
+    # 피드백 pdf S3에 업로드
+    path('upload/pdf/', views.upload_feedback_pdf,  name='upload-feedback-pdf'),
+    
     # ✅ 추가: 프론트에서 요청하는 경로에 맞춤
     path('interview/feedback/generate/', generate_feedback_report, name='generate_feedback'),
 

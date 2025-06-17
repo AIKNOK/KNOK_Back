@@ -1,0 +1,28 @@
+{
+  "family": "knok-backend-task",
+  "containerDefinitions": [
+    {
+      "name": "knok-backend",
+      "image": "257120632536.dkr.ecr.ap-northeast-2.amazonaws.com/knok-backend:backend-19994478375d812155b56687497dbfd6bcf01122", 
+      "essential": true,
+      "portMappings": [
+        {
+          "containerPort": 8000,
+          "protocol": "tcp"
+        }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/knok-backend",
+          "awslogs-region": "ap-northeast-2",
+          "awslogs-stream-prefix": "ecs"
+        }
+      }
+    }
+  ],
+  "requiresCompatibilities": ["FARGATE"],
+  "networkMode": "awsvpc",
+  "cpu": "256",
+  "memory": "512"
+}

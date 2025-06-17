@@ -6,7 +6,6 @@ from rest_framework.decorators import authentication_classes, permission_classes
 from pydub import AudioSegment
 from myapp.utils.keyword_extractor import extract_resume_keywords
 from myapp.utils.followup_logic import should_generate_followup
-from myapp.utils.pdf import feedback_pdf_upload
 
 import requests
 import re
@@ -685,6 +684,14 @@ def receive_posture_count(request):
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def decide_followup_question(request):
+    auth_header = request.headers.get('Authorization', '')
+    if not auth_header.startswith('Bearer '):
+        return Response({'error': 'Authorization 헤더가 없습니다.'}, status=401)
+    
+    token = auth_header.replace('Bearer ', '', 1).strip()
+    headers = {
+        "Authorization": f"Bearer {token}"
+    }
     resume_text = request.data.get('resume_text')
     user_answer = request.data.get('user_answer')
     base_question_number = request.data.get('base_question_number')
@@ -700,19 +707,8 @@ def decide_followup_question(request):
     should_generate = should_generate_followup(user_answer, keywords)
     matched_keywords = [kw for kw in keywords if kw in user_answer]
 
-    # 🔍 로그 출력
-    print("🧾 이력서 키워드:", keywords)
-    print("🗣️ 사용자 답변:", user_answer)
-    print("✅ 매칭된 키워드:", matched_keywords)
-    print("📌 follow-up 생성 여부:", should_generate)
-
     if not should_generate:
-        print("❌ 조건 미충족으로 꼬리질문 생성하지 않음")
-        return Response({
-            'followup': False,
-            'matched_keywords': matched_keywords,
-            'reason': 'user_answer에 핵심 키워드가 충분히 포함되지 않았습니다.'
-        })
+        return Response({'followup': False, 'matched_keywords': matched_keywords})
 
     # 2. Claude 프롬프트 구성 및 질문 생성
     prompt = f"""
@@ -728,8 +724,6 @@ def decide_followup_question(request):
         return Response({'error': 'Claude 호출 실패', 'detail': str(e)}, status=500)
 
     # 3. 새로운 follow-up 질문 번호 지정
-    base_question_number = str(base_question_number)
-
     suffix_numbers = [
         int(q.split('-')[1])
         for q in existing_question_numbers
@@ -738,12 +732,6 @@ def decide_followup_question(request):
     next_suffix = max(suffix_numbers, default=0) + 1
     followup_question_number = f"{base_question_number}-{next_suffix}"
 
-    email = request.user.email 
-    username = email.split('@')[0] 
-
-    followup_bucket = settings.AWS_FOLLOWUP_QUESTION_BUCKET_NAME
-    s3_key = f"{username}/{interview_id}/{followup_question_number}.txt"
-
     # 4. S3에 질문 저장
     s3_client = boto3.client(
         "s3",
@@ -751,38 +739,46 @@ def decide_followup_question(request):
         aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY"),
     )
 
+    followup_bucket = settings.AWS_FOLLOWUP_QUESTION_BUCKET_NAME
+    s3_key = f"{interview_id}/{followup_question_number}.json"
+
+    question_data = {
+        "question_number": followup_question_number,
+        "question": question
+    }
+
     try:
         s3_client.put_object(
             Bucket=followup_bucket,
             Key=s3_key,
-            Body=question.encode('utf-8'), 
-            ContentType='text/plain'
+            Body=json.dumps(question_data).encode('utf-8'),
+            ContentType='application/json'
         )
     except Exception as e:
         return Response({'error': 'S3 저장 실패', 'detail': str(e)}, status=500)
 
     # TTS 서버 호출
-    tts_s3_key = f"tts_outputs/{username}/{interview_id}/질문{followup_question_number}.mp3"
+    tts_url = "http://13.124.226.197:8002/api/generate-followup-question/tts/"
     try:
-        tts_response = requests.post(
-            "http://<TTS_SERVER_HOST>/tts",
-            json={"text": question, "s3_key": tts_s3_key},
-            timeout=10
+        tts_response = requests.post(tts_url, json={
+            "question_number": followup_question_number,
+            "text": question
+        },
+        headers=headers
         )
-        tts_response.raise_for_status()
-        audio_url = tts_response.json().get("audio_url")
-        if not audio_url:
-            raise ValueError("TTS 서버 응답에 audio_url 없음")
+        if tts_response.status_code != 200:
+            raise Exception(tts_response.text)
+        tts_result = tts_response.json()
+        audio_url = tts_result.get("file_url")
     except Exception as e:
-        return Response({'error': 'TTS 서버 호출 실패', 'detail': str(e)}, status=500)
-    
+        return Response({'error': 'TTS 호출 실패', 'detail': str(e)}, status=500)
+
     return Response({
         'followup': True,
         'question_number': followup_question_number,
         'question': question,
-        'matched_keywords': matched_keywords,
-        's3_key': s3_key, 
-        'audio_url': audio_url
+        'audio_url': audio_url,
+        'matched_keywords': matched_keywords
     })
 
 
@@ -1316,3 +1312,91 @@ def end_interview_session(request):
         'message': '면접 세션 종료 및 데이터 정리 완료',
         'deleted': deleted_files
     })
+# TTS 음성파일 가져오기
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def get_ordered_question_audio(request):
+    user = request.user
+    email_prefix = user.email.split('@')[0]
+    bucket = settings.AWS_TTS_BUCKET_NAME
+    prefix = f'tts_outputs/dlrjsgh8529/'
+    #
+    s3 = boto3.client(
+        's3',
+        aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
+        aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
+        region_name=settings.AWS_S3_REGION_NAME
+    )
+
+    response = s3.list_objects_v2(Bucket=bucket, Prefix=prefix)
+    if 'Contents' not in response:
+        print("⚠️ S3 목록이 비어있습니다.")
+        return Response([], status=200)
+
+    wav_files = [obj['Key'] for obj in response['Contents'] if obj['Key'].endswith('.wav')]
+    print("🔍 S3에서 찾은 wav 파일들:", wav_files)
+
+    def parse_question_info(key):
+        filename = key.split('/')[-1].replace('.wav', '').replace('질문 ', '')
+        match = re.match(r"^(\d+)(?:-(\d+))?$", filename)
+        if not match:
+            print(f"❌ 정규식 매칭 실패: {filename}")
+            return None
+        major = int(match.group(1))
+        minor = int(match.group(2)) if match.group(2) else 0
+        order = major + minor * 0.01
+        question_id = f"q{filename.replace('-', '_')}"
+        parent_id = f"q{major}" if minor else None
+        encoded_key = quote(key)
+        audio_url = f"https://{bucket}.s3.{settings.AWS_S3_REGION_NAME}.amazonaws.com/{encoded_key}"
+        print(f"✅ 파싱 성공: {question_id}, {audio_url}")
+        return {
+            "id": question_id,
+            "audio_url": audio_url,
+            "order": order,
+            "parent_id": parent_id
+        }
+
+    parsed = [parse_question_info(key) for key in wav_files]
+    print("🧾 파싱된 결과:", parsed)
+
+    results = list(filter(None, parsed))
+    results = sorted(results, key=lambda x: x["order"])
+    return Response(results)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def decide_resume_question(request):
+    auth_header = request.headers.get('Authorization', '')
+    if not auth_header.startswith('Bearer '):
+        return Response({'error': 'Authorization 헤더가 없습니다.'}, status=401)
+    
+    token = auth_header.replace('Bearer ', '', 1).strip()
+    headers = {
+        "Authorization": f"Bearer {token}"
+    }
+
+    tts_url = "http://13.124.226.197:8002/api/generate-followup-question/tts/"
+    try:
+        # 외부 POST 요청 (body 없음)
+        tts_response = requests.post(tts_url, headers=headers)
+
+        # 응답 상태 코드 확인
+        if tts_response.status_code != 200:
+            return Response({
+                "error": "Resume TTS 생성 실패",
+                "detail": tts_response.json()
+            }, status=tts_response.status_code)
+
+        # 성공 응답 반환
+        return Response({
+            "message": "Resume TTS 호출 성공",
+            "result": tts_response.json()
+        }, status=200)
+
+    except requests.exceptions.RequestException as e:
+        return Response({
+            "error": "Resume TTS 호출 중 예외 발생",
+            "detail": str(e)
+        }, status=500)

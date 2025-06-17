@@ -1,14 +1,15 @@
-name: Build & Push FastAPI WebSocket
+name: CI/CD for FastAPI WebSocket
 
 on:
   push:
+    branches: [ main ]
     paths:
       - "websocket/**"
       - "Dockerfile.websocket"
       - "requirements.txt"
 
 jobs:
-  build-and-push:
+  deploy:
     runs-on: ubuntu-latest
 
     steps:
@@ -22,14 +23,23 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ secrets.AWS_REGION }}
 
-      - name: Login to ECR
+      - name: Login to Amazon ECR
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v1
 
-      - name: Build & Push WebSocket image
+      - name: Build and Push Docker Image to ECR
         env:
-          ECR_REPOSITORY: ${{ secrets.ECR_REPOSITORY }}
+          ECR_REPOSITORY: ${{ secrets.ECR_WEBSOCKET_REPO }}
           IMAGE_TAG: websocket-${{ github.sha }}
         run: |
           docker build -f Dockerfile.websocket -t $ECR_REPOSITORY:$IMAGE_TAG .
           docker push $ECR_REPOSITORY:$IMAGE_TAG
+
+      - name: Deploy to ECS
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v1
+        with:
+          task-definition: ecs-task-def-websocket.json
+          service: ${{ secrets.ECS_WEBSOCKET_SERVICE }}
+          cluster: ${{ secrets.ECS_CLUSTER_NAME }}
+          image: ${{ secrets.ECR_WEBSOCKET_REPO }}:websocket-${{ github.sha }}
+          wait-for-service-stability: true

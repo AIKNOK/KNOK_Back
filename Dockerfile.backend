@@ -1,11 +1,10 @@
 # Dockerfile.backend
 FROM python:3.11-slim
 
-# ffmpeg 및 webrtcvad 빌드 도구 추가
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ffmpeg \
     build-essential \
     python3-dev \
+    ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -16,4 +15,4 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY backend/ ./backend/
 WORKDIR /app/backend
 
-CMD ["python", "manage.py", "runserver", "0.0.0.0:8000"]
+CMD ["gunicorn", "config.wsgi:application", "--bind", "0.0.0.0:8000"]

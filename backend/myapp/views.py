@@ -1558,5 +1558,7 @@ def decide_resume_question(request):
             "detail": str(e)
         }, status=500)
 
+
 def health_check(request):
     return JsonResponse({"status": "ok"})
+  

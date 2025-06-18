@@ -3,6 +3,7 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.decorators import authentication_classes, permission_classes
+from rest_framework import status
 from pydub import AudioSegment
 from myapp.utils.keyword_extractor import extract_resume_keywords
 from myapp.utils.followup_logic import should_generate_followup
@@ -32,6 +33,10 @@ from django.http import JsonResponse
 from pathlib import Path
 from django.views.decorators.csrf import csrf_exempt
 from django.http import FileResponse
+from datetime import timedelta
+from reportlab.pdfgen import canvas  # or your preferred PDF lib
+from reportlab.lib.pagesizes import A4
+from botocore.exceptions import ClientError
 
 # 🔐 SECRET_HASH 계산 함수 (Cognito)
 def get_secret_hash(username):
@@ -294,18 +299,27 @@ def generate_resume_questions(request):
     
     # ✅ Claude 프롬프트 생성 
     prompt = f"""
+    당신은 AI 면접 질문 생성기입니다.
+
     다음은 이력서 내용입니다:
     {text}
 
-    위 이력서를 바탕으로 면접 질문 3개를 만들어주세요.
+    이력서를 바탕으로 해당 지원자가 실제 면접에서 받을 법한 면접 질문을 3개 작성해 주세요.
     형식은 아래와 같이 해주세요:
 
-    - 질문 앞에 숫자나 '질문 1)', '1.', 'Q1' 등의 접두어는 절대 붙이지 마세요.
-    - 그냥 질문 내용만 문장 형태로 자연스럽게 출력해주세요.
-    - 줄바꿈으로 구분해 주세요.
+    - 이력서에 언급된 기술, 경험, 프로젝트, 직무 관련 내용에서만 질문을 추출하세요.
+    - 자기소개, 기술 역량, 협업/갈등 해결, 문제 해결 방식 등을 중심으로 구성하세요.
+    - 절대로 질문 앞에 숫자나 'Q1' 같은 접두어를 붙이지 마세요.
+    - 질문만 한 줄씩 출력하세요.
+    - 줄바꿈으로 각 질문을 구분하세요.
+
+    난이도 지침:
     - {difficulty_prompt}
     
     예시 출력 형식:
+    React 프로젝트에서 성능 최적화를 위해 어떤 방법을 사용하셨나요?
+    협업 중 의견 충돌이 있었을 때 어떻게 해결하셨나요?
+    본인의 기술 역량 중 가장 자신 있는 부분은 무엇인가요?
     지원하신 직무와 관련해 가장 자신 있는 기술 스택은 무엇인가요?
     해당 기술을 활용해 문제를 해결했던 경험을 말씀해 주세요.
     팀 프로젝트에서 본인이 맡았던 역할과 해결한 기술적 문제는 무엇이었나요?
@@ -334,18 +348,21 @@ def generate_resume_questions(request):
 
     # ✅ Claude 검증 프롬프트 (고정 질문 제외)
     verify_prompt = f"""
-이력서 내용과 아래 Claude가 생성한 면접 질문을 검토하세요.
+다음은 사용자의 이력서와 AI가 생성한 면접 질문 목록입니다.
 
 이력서:
 {text}
 
-면접 질문:
+AI가 생성한 질문:
 {chr(10).join(questions)}
 
 요청:
-- 이력서와 관련 없는 질문은 제거하거나 수정해 주세요.
-- 관련성 있는 질문만 남기고, 질문 내용은 줄바꿈으로 구분해서 출력해 주세요.
-- 번호, 접두어 없이 질문만 출력하세요.
+- 아래 기준에 따라 질문이 이력서와 실제로 관련 있는지 판단해 주세요.
+- "기술 스택", "업무 경험", "학습 내용", "프로젝트", "자격증", "직무 관심도" 등 이력서에 실제로 언급된 내용과 관련된 질문만 남겨 주세요.
+- 관련 없는 질문은 제거하거나, 관련된 내용으로 수정해 주세요.
+- 질문 앞에 숫자나 Q1 같은 접두어는 붙이지 마세요.
+- 질문만 줄바꿈으로 구분해서 출력하세요.
+
 """
     verify_body = {
         "anthropic_version": "bedrock-2023-05-31",
@@ -364,7 +381,6 @@ def generate_resume_questions(request):
     verified_questions = [line.strip() for line in verified_text.strip().split('\n') if line.strip()]
     print("✅ Claude 검증 완료 질문:", verified_questions)
 
-
     # 고정 질문
     final_questions = ["간단히 자기소개 부탁드릴게요"] + verified_questions[:3]
     print("📦 최종 질문 (고정 + 검증된 질문):", final_questions)
@@ -378,35 +394,70 @@ def generate_resume_questions(request):
             ContentType='text/plain'
         )
 
+    auth_header = request.headers.get('Authorization', '')
+    if not auth_header.startswith('Bearer '):
+        return Response({'error': 'Authorization 헤더가 없습니다.'}, status=401)
+    
+    token = auth_header.replace('Bearer ', '', 1).strip()
+    headers = {
+        "Authorization": f"Bearer {token}"
+    }
+    try:
+        tts_response = requests.post(
+            "http://54.180.240.216:8002/api/generate-resume-question/",
+            headers=headers,
+            timeout=30
+        )
+        if tts_response.status_code != 200:
+            print("❌ TTS 생성 실패:", tts_response.text)
+        else:
+            print("✅ TTS 생성 완료")
+    except Exception as e:
+        print("❗ TTS 호출 중 예외 발생:", e)
+
     return Response({"message": "질문 저장 완료", "questions": final_questions})
 
 
 
 # Claude 3 호출 함수 추가
-def get_claude_feedback(prompt):
+
+
+
+def get_claude_feedback(prompt: str) -> str:
+    print(">> get_claude_feedback received:", prompt)
+    
     client = boto3.client("bedrock-runtime", region_name="us-east-1")
+    
+    try:
+        # Claude 3.7 Sonnet 모델 직접 호출 (온디맨드 방식)
+        response = client.invoke_model(
+            modelId="us.anthropic.claude-3-7-sonnet-20250219-v1:0",  # Claude 3.7 Sonnet 모델 ID
+            contentType="application/json",
+            accept="application/json",
+            body=json.dumps({
+                "anthropic_version": "bedrock-2023-05-31",
+                "max_tokens": 2048,
+                "temperature": 0.0,
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": [{"type": "text", "text": prompt}],
+                    }
+                ]
+            }),
+        )
+    except ClientError as e:
+        print(f"Claude API 호출 오류: {str(e)}")
+        raise
+    
+    payload = json.loads(response["body"].read().decode("utf-8"))
 
-    body = {
-        "anthropic_version": "bedrock-2023-05-31",
-        "max_tokens": 512,
-        "temperature": 0.7,
-        "messages": [
-            {
-                "role": "user",
-                "content": prompt
-            }
-        ]
-    }
-
-    response = client.invoke_model(
-        modelId="anthropic.claude-3-haiku-20240307-v1:0",
-        contentType="application/json",
-        accept="application/json",
-        body=json.dumps(body)
-    )
-
-    result = json.loads(response["body"].read())
-    return result["content"][0]["text"] if result.get("content") else "Claude 응답 없음"
+    # 최신 Claude API는 content 배열을 반환
+    if "content" in payload and len(payload["content"]) > 0:
+        return payload["content"][0]["text"].strip()
+    else:
+        print("Claude 응답에 content 필드가 없습니다:", payload)
+        return ""
 
 #s3 에서 파일 가져오기
 def download_multiple_audios_from_s3(bucket, prefix='audio/'):
@@ -508,6 +559,72 @@ def parse_claude_feedback_and_score(raw_text: str) -> dict:
             "raw": raw_text
         }
 
+# json 형태로 변환    
+def parse_plain_feedback(text: str) -> dict:
+    """
+    raw_text (플레인) 을 summary/detail/chart 로 구조화해서 dict로 반환
+    {
+      "summary": str,
+      "detail": { "일관성": "...", … },
+      "chart": { "일관성": 4, … }
+    }
+    """
+    feedback = {"summary": "", "detail": {}, "chart": {}}
+    section = None
+    buffer = []
+
+    expected_keys = ["일관성", "논리성", "대처능력", "구체성", "말하기방식", "면접태도"]
+
+    def save_section(sec, buf):
+        content = "\n".join(buf).strip()
+        if sec == "요약":
+            feedback["summary"] = content
+        elif sec in expected_keys:
+            # "- 코멘트…" 과 "(점수: X점)" 을 분리
+            lines = content.splitlines()
+            comment_lines = [l for l in lines if not l.startswith("(점수")]
+            score_line = next((l for l in lines if l.startswith("(점수")), "")
+            # 코멘트 저장
+            feedback["detail"][sec] = "\n".join(comment_lines).lstrip("- ").strip()
+            # 점수 추출
+            import re
+            m = re.search(r"점수[^\d]*(\d+)", score_line)
+            if m:
+                feedback["chart"][sec] = int(m.group(1))
+
+    # 파싱 시작
+    for line in text.splitlines():
+        if line.startswith("=== ") and line.endswith(" ==="):
+            if section:
+                save_section(section, buffer)
+            section = line.strip("= ").strip()
+            buffer = []
+        else:
+            buffer.append(line)
+    if section:
+        save_section(section, buffer)
+
+    # 누락 항목은 0점 처리
+    for key in expected_keys:
+        feedback["detail"].setdefault(key, "")
+        feedback["chart"].setdefault(key, 0)
+
+    return feedback
+
+# Claude 답변 사전 점검 (6개 다 했는지)
+def validate_claude_feedback_format(text: str) -> dict:
+    required_sections = ["일관성", "논리성", "대처능력", "구체성", "말하기방식", "면접태도"]
+    missing_sections = []
+
+    for section in required_sections:
+        if f"=== {section} ===" not in text:
+            missing_sections.append(section)
+
+    return {
+        "is_valid": len(missing_sections) == 0,
+        "missing_sections": missing_sections
+    }
+  
 
 def analyze_speech_rate_via_transcribe(transcribed_text, audio_path):
     y, sr = librosa.load(audio_path, sr=None)
@@ -524,15 +641,21 @@ def analyze_speech_rate_via_transcribe(transcribed_text, audio_path):
 def analyze_voice_api(request):
     start_time = time.time()
 
-    bucket = 'whisper-testt'
-    prefix = 'audio/'  # 여러 질문 오디오가 여기에 저장되어 있다고 가정
-
+    upload_id    = request.data.get('upload_id') 
     posture_count = request.data.get('posture_count', 0)
-    # transcribe_text = request.data.get('transcribe_text', '')
+    if not upload_id:
+        return JsonResponse({'error': 'upload_id 필수'}, status=400)
+    
+    bucket = 'live-stt'
+    email_prefix = request.user.email.split('@')[0]
+    
+    prefix = f"{email_prefix}/{upload_id}/wavs/"   # 여러 답변 오디오가 여기에 저장되어 있음
 
     try:
         # 1. 다중 오디오 다운로드 및 병합
         audio_files = download_multiple_audios_from_s3(bucket, prefix)
+        if not audio_files:
+            return JsonResponse({'error': '오디오 파일을 찾을 수 없습니다.'}, status=404)
         merged_audio_path = merge_audio_files(audio_files)
 
         # 🔍 병합된 오디오 길이 확인 로그 (디버깅용)
@@ -566,6 +689,7 @@ def analyze_voice_api(request):
         }, json_dumps_params={'ensure_ascii': False})
 
     except Exception as e:
+        print("🔥 analyze_voice_api 예외:\n", traceback.format_exc())
         return JsonResponse({'error': str(e)}, status=500)
  
 # [2] 피드백 리포트 생성 API (STT 분석 결과 기반)
@@ -573,18 +697,21 @@ def analyze_voice_api(request):
 @permission_classes([IsAuthenticated])
 def generate_feedback_report(request):
     user = request.user
-    analysis = request.data.get("analysis")
+    analysis = request.data.get("analysis", {})
 
     # merge_texts_from_s3_folder 호출하여 transcript 획득
     if not analysis.get('transcribe_text'):
         # email_prefix나 upload_id는 클라이언트에서 전달
-        email_prefix = analysis.get('email_prefix', user.email)
+        email_prefix = analysis.get('email_prefix', user.email.split("@")[0])
         upload_id = analysis.get('upload_id')
         transcribe_text = merge_texts_from_s3_folder(email_prefix, upload_id)
         analysis['transcribe_text'] = transcribe_text
 
-    # 프롬프트 생성
-    posture_count = analysis.get("posture_count", 0)
+    posture_counts: dict = analysis.get("posture_count", {})
+    # posture_count = analysis.get("posture_count", 0)
+
+    # 그 값들의 합을 실제 이벤트 횟수로 사용
+    total_posture_events = sum(posture_counts.values())
 		
 		# 프롬프트 구성
     voice_desc = f"""
@@ -595,7 +722,7 @@ def generate_feedback_report(request):
 - 감정 상태: {analysis['emotion']}
 """
 
-    posture_desc = f"면접 중 총 {posture_count}회의 자세 흔들림이 감지되었습니다."
+    posture_desc = f"면접 중 총 {total_posture_events}회의 자세 흔들림이 감지되었습니다."
     transcribe_desc = analysis["transcribe_text"]
 
     prompt = f"""
@@ -610,47 +737,74 @@ def generate_feedback_report(request):
 [자세 분석 결과]
 {posture_desc}
 
----
+위 데이터를 바탕으로 면접자의 답변을 다음 기준에 따라 피드백을 작성해주세요. 반드시 아래 형식을 따라 작성해주세요:
 
-위 데이터를 바탕으로 면접자의 답변을 다음 기준으로 피드백을 제시해주세요:
-1. 일관성: 답변 전체에 흐름이 있고 앞뒤가 자연스럽게 연결되는가?
-2. 논리성: 주장에 대해 명확한 이유와 근거가 있으며 논리적 흐름이 있는가?
-3. 대처능력: 예상치 못한 질문에도 당황하지 않고 유연하게 답했는가?
-4. 구체성: 추상적인 설명보다 구체적인 경험과 예시가 포함되어 있는가?
-5. 음성 피드백 : 음성 분석 결과를 기준으로 피드백을 제시해주세요.
-6. 자세 피드백 : 자세 분석 결과를 기준으로 피드백을 제시해주세요.
+=== 요약 ===
+[면접자 평가에 대한 전체적인 요약 1-2문장]
 
-각 항목에 대해 피드백을 작성하고, 최대한 핵심적인 요소를 강조해주세요. 그리고 0~5점 점수를 chart로 표현해주세요.
-다음 JSON 형식으로만 응답해주세요:
+=== 일관성 ===
+- [답변 전체에 흐름이 있고 앞뒤가 자연스럽게 연결되는지에 대한 피드백]
+(점수: 0~5점 중 하나)
 
+=== 논리성 ===
+- [주장에 대해 명확한 이유와 근거가 있으며 논리적 흐름이 있는지에 대한 피드백]
+(점수: 0~5점 중 하나)
 
-{{
-  "summary": "...",
-  "detail": {{
-    "일관성": "...",
-    "논리성": "...",
-    "대처능력": "...",
-    "구체성": "...",
-    "말하기방식": "...",
-    "면접태도": "..."
-  }},
-  "chart": {{
-    "일관성": 0~5,
-    "논리성": 0~5,
-    "대처능력": 0~5,
-    "구체성": 0~5,
-    "말하기방식": 0~5,
-    "면접태도": 0~5
-  }}
-}}
+=== 대처능력 ===
+- [예상치 못한 질문에도 당황하지 않고 유연하게 답했는지에 대한 피드백]
+(점수: 0~5점 중 하나)
 
-⚠️ 반드시 위 JSON 구조로만 응답해주세요.
-JSON 코드 블럭(```json ...```) 안에만 결과를 담아주세요.
+=== 구체성 ===
+- [추상적인 설명보다 구체적인 경험과 예시가 포함되어 있는지에 대한 피드백]
+(점수: 0~5점 중 하나)
+
+=== 말하기방식 ===
+- [음성 분석 결과({voice_desc})를 바탕으로 목소리 떨림 여부와 말 속도(단어/초)에 대한 코멘트]
+- [음성 분석 결과({voice_desc})를 바탕으로 침묵 비율(%)과 감정 상태에 대한 코멘트]
+(점수: 0~5점 중 하나)
+
+=== 면접태도 ===
+- [자세 분석 결과({posture_desc})를 바탕으로 자세 흔들림 횟수와 그 빈도에 대한 해석을 포함한 코멘트]
+(점수: 0~5점 중 하나)
 """
+    # 로그 확인
+    print("===== generate_feedback_report prompt =====")
+    print(prompt)
+    print("===== transcribe_desc =====")
+    print(transcribe_desc)
+    print("===== voice_desc =====")
+    print(voice_desc)
+    print("===== posture_desc =====")
+    print(posture_desc)
+    print("========================================")
 
-    raw_text = get_claude_feedback(prompt)
+    try:
+        raw_text = get_claude_feedback(prompt)
+    except ClientError as e:
+        return Response(
+            {"error": "AI 모델 호출 오류", "detail": str(e)},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+    except Exception as e:
+        return Response(
+            {"error": "예상치 못한 오류", "detail": str(e)},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+    # 검증
+    validation = validate_claude_feedback_format(raw_text)
+    if not validation["is_valid"]:
+        print("❌ Claude 응답에서 누락된 항목:", validation["missing_sections"])
+    else:
+        print("✅ 모든 항목 포함됨")
+
+    # Claude 원본 응답 확인
+    print("===== Claude 원본 응답 (raw_text) =====")
+    print(raw_text)
     
-    feedback = parse_claude_feedback_and_score(raw_text)
+    # 플레인 텍스트를 파싱해서 구조화된 dict로 변환
+    feedback = parse_plain_feedback(raw_text)
+    # feedback = parse_claude_feedback_and_score(raw_text)
     return Response(feedback)
 
     
@@ -758,7 +912,7 @@ def decide_followup_question(request):
         return Response({'error': 'S3 저장 실패', 'detail': str(e)}, status=500)
 
     # TTS 서버 호출
-    tts_url = "http://13.124.226.197:8002/api/generate-followup-question/tts/"
+    tts_url = "http://43.201.0.76:8002/api/generate-followup-question/tts/"
     try:
         tts_response = requests.post(tts_url, json={
             "question_number": followup_question_number,
@@ -1111,7 +1265,7 @@ def get_interview_question_audio_list(request):
         return Response({'error': 'interview_id 파라미터가 필요합니다.'}, status=400)
 
     bucket_name = settings.AWS_TTS_BUCKET_NAME
-    prefix = f"tts_outputs/{email_prefix}/{interview_id}/"
+    prefix = f"{email_prefix}/{interview_id}/"
 
     s3 = boto3.client('s3',
                       aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
@@ -1215,21 +1369,24 @@ def download_feedback_zip(request):
     
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
-def generate_feedback_pdf_view(request):
-    try:
-        video_id = request.data.get("videoId")
-        feedback_text = request.data.get("feedback_text")
-        if not video_id or not feedback_text:
-            return Response({"error": "videoId, feedback_text 필수"}, status=400)
+def upload_feedback_pdf(request):
+    file = request.FILES.get("file")
+    video_id = request.POST.get("videoId")
+    if not file or not video_id:
+        return Response({"error": "file, videoId 필수"}, status=400)
 
-        email_prefix = request.user.email.split('@')[0]
-        pdf_url = feedback_pdf_upload(email_prefix, video_id)
-        return Response({"pdf_url": pdf_url})
+    email_prefix = request.user.email.split('@')[0]
+    pdf_key = f"clips/{email_prefix}/{video_id}_report.pdf"
 
-    except Exception as e:
-        import traceback
-        print("🔥 피드백 PDF 생성 예외:", traceback.format_exc())
-        return Response({"error": str(e)}, status=500)
+    s3 = boto3.client("s3",
+                      aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
+                      aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
+                      region_name=settings.AWS_S3_REGION_NAME)
+    s3.upload_fileobj(file, settings.AWS_CLIP_VIDEO_BUCKET_NAME, pdf_key,
+                      ExtraArgs={"ContentType": "application/pdf"})
+
+    url = f"https://{settings.AWS_CLIP_VIDEO_BUCKET_NAME}.s3.{settings.AWS_S3_REGION_NAME}.amazonaws.com/{pdf_key}"
+    return Response({"pdf_url": url})
 
 SLACK_WEBHOOK_URL = "https://hooks.slack.com/services/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"
 
@@ -1319,7 +1476,7 @@ def get_ordered_question_audio(request):
     user = request.user
     email_prefix = user.email.split('@')[0]
     bucket = settings.AWS_TTS_BUCKET_NAME
-    prefix = f'tts_outputs/dlrjsgh8529/'
+    prefix = f'{email_prefix}/'
     #
     s3 = boto3.client(
         's3',
@@ -1377,7 +1534,7 @@ def decide_resume_question(request):
         "Authorization": f"Bearer {token}"
     }
 
-    tts_url = "http://13.124.226.197:8002/api/generate-followup-question/tts/"
+    tts_url = "http://54.180.240.216:8002/api/generate-followup-question/tts/"
     try:
         # 외부 POST 요청 (body 없음)
         tts_response = requests.post(tts_url, headers=headers)

@@ -362,6 +362,7 @@ AI가 생성한 질문:
 - 관련 없는 질문은 제거하거나, 관련된 내용으로 수정해 주세요.
 - 질문 앞에 숫자나 Q1 같은 접두어는 붙이지 마세요.
 - 질문만 줄바꿈으로 구분해서 출력하세요.
+
 """
     verify_body = {
         "anthropic_version": "bedrock-2023-05-31",
@@ -379,7 +380,6 @@ AI가 생성한 질문:
     verified_text = verify_result['content'][0]['text'] if verify_result.get("content") else ""
     verified_questions = [line.strip() for line in verified_text.strip().split('\n') if line.strip()]
     print("✅ Claude 검증 완료 질문:", verified_questions)
-
 
     # 고정 질문
     final_questions = ["간단히 자기소개 부탁드릴게요"] + verified_questions[:3]
@@ -624,7 +624,7 @@ def validate_claude_feedback_format(text: str) -> dict:
         "is_valid": len(missing_sections) == 0,
         "missing_sections": missing_sections
     }
-
+  
 
 def analyze_speech_rate_via_transcribe(transcribed_text, audio_path):
     y, sr = librosa.load(audio_path, sr=None)

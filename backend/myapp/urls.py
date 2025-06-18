@@ -42,7 +42,7 @@ urlpatterns = [
 
     # 피드백 pdf S3에 업로드
     path('upload/pdf/', views.upload_feedback_pdf,  name='upload-feedback-pdf'),
-    
+
     # ✅ 추가: 프론트에서 요청하는 경로에 맞춤
     path('interview/feedback/generate/', generate_feedback_report, name='generate_feedback'),
 
@@ -60,4 +60,3 @@ urlpatterns = [
     path('followup/check/', decide_followup_question, name='followup_check'),
 
 ]
-

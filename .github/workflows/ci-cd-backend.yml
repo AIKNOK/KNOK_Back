@@ -14,33 +14,54 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+    - name: Checkout code
+      uses: actions/checkout@v4
 
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v2
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ secrets.AWS_REGION }}
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v2
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ secrets.AWS_REGION }}
 
-      - name: Login to Amazon ECR
-        id: login-ecr
-        uses: aws-actions/amazon-ecr-login@v1
+    - name: Login to Amazon ECR
+      id: login-ecr
+      uses: aws-actions/amazon-ecr-login@v1
 
-      - name: Build and Push Docker Image to ECR
-        env:
-          ECR_REPOSITORY: ${{ secrets.ECR_BACKEND_REPO }}
-          IMAGE_TAG: backend-${{ github.sha }}
-        run: |
-          docker build -f Dockerfile.backend -t $ECR_REPOSITORY:$IMAGE_TAG .
-          docker push $ECR_REPOSITORY:$IMAGE_TAG
+    - name: Build and Push Docker Image to ECR
+      env:
+        ECR_REPOSITORY: ${{ secrets.ECR_BACKEND_REPO }}
+        IMAGE_TAG: backend-${{ github.sha }}
+      run: |
+        docker build -f Dockerfile.backend -t $ECR_REPOSITORY:$IMAGE_TAG .
+        docker push $ECR_REPOSITORY:$IMAGE_TAG
 
-      - name: Deploy to ECS
-        uses: aws-actions/amazon-ecs-deploy-task-definition@v1
-        with:
-          task-definition: ecs-task-def-backend.json
-          service: ${{ secrets.ECS_BACKEND_SERVICE }}
-          cluster: ${{ secrets.ECS_CLUSTER_NAME }}
-          image: ${{ secrets.ECR_BACKEND_REPO }}:backend-${{ github.sha }}
-          wait-for-service-stability: true
+    - name: Get current task definition
+      id: get-task-def
+      run: |
+        aws ecs describe-task-definition \
+          --task-definition ${{ secrets.ECS_BACKEND_TASK }} \
+          --query 'taskDefinition' > task-definition.json
+
+    - name: Create new task definition with updated image
+      id: new-task-def
+      run: |
+        IMAGE="${{ secrets.ECR_BACKEND_REPO }}:backend-${{ github.sha }}"
+        jq '.containerDefinitions[0].image = "'$IMAGE'"' task-definition.json \
+          | jq 'del(.status, .revision, .taskDefinitionArn, .requiresAttributes, .compatibilities, .registeredAt, .registeredBy)' \
+          > new-task-def.json
+
+        aws ecs register-task-definition \
+          --cli-input-json file://new-task-def.json \
+          > task-def-response.json
+
+        NEW_REVISION=$(jq -r '.taskDefinition.taskDefinitionArn' task-def-response.json)
+        echo "TASK_DEF_ARN=$NEW_REVISION" >> $GITHUB_ENV
+
+    - name: Deploy new task definition to ECS
+      uses: aws-actions/amazon-ecs-deploy-task-definition@v1
+      with:
+        task-definition: new-task-def.json
+        service: ${{ secrets.ECS_BACKEND_SERVICE }}
+        cluster: ${{ secrets.ECS_CLUSTER_NAME }}
+        wait-for-service-stability: true

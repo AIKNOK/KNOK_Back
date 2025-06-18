@@ -404,7 +404,7 @@ AI가 생성한 질문:
     }
     try:
         tts_response = requests.post(
-            "http://54.180.240.216:8002/api/generate-resume-question/",
+            "http://43.203.222.186:8002/api/generate-resume-question/",
             headers=headers,
             timeout=30
         )
@@ -1534,7 +1534,7 @@ def decide_resume_question(request):
         "Authorization": f"Bearer {token}"
     }
 
-    tts_url = "http://54.180.240.216:8002/api/generate-followup-question/tts/"
+    tts_url = "http://43.203.222.186:8002/api/generate-followup-question/tts/"
     try:
         # 외부 POST 요청 (body 없음)
         tts_response = requests.post(tts_url, headers=headers)
@@ -1557,3 +1557,6 @@ def decide_resume_question(request):
             "error": "Resume TTS 호출 중 예외 발생",
             "detail": str(e)
         }, status=500)
+
+def health_check(request):
+    return JsonResponse({"status": "ok"})

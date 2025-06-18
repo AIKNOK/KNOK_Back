@@ -61,7 +61,7 @@ jobs:
     - name: Deploy new task definition to ECS
       uses: aws-actions/amazon-ecs-deploy-task-definition@v1
       with:
-        task-definition: ${{ env.TASK_DEF_ARN }}
+        task-definition: new-task-def.json
         service: ${{ secrets.ECS_BACKEND_SERVICE }}
         cluster: ${{ secrets.ECS_CLUSTER_NAME }}
         wait-for-service-stability: true

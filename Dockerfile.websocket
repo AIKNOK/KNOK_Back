@@ -1,0 +1,17 @@
+# Dockerfile.websocket
+FROM python:3.11-slim
+
+# webrtcvad 빌드 도구 추가
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    python3-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY websocket/ ./websocket/
+
+CMD ["uvicorn", "websocket.fastapi_server:app", "--host", "0.0.0.0", "--port", "8001"]

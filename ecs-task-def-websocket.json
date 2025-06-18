@@ -1,0 +1,29 @@
+{
+  "family": "knok-websocket-task",
+  "executionRoleArn": "arn:aws:iam::257120632536:role/ecsTaskExecutionRole",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "256",
+  "memory": "512",
+  "containerDefinitions": [
+    {
+      "name": "knok-websocket",
+      "image": "257120632536.dkr.ecr.ap-northeast-2.amazonaws.com/knok-websocket:websocket-19994478375d812155b56687497dbfd6bcf01122",
+      "essential": true,
+      "portMappings": [
+        {
+          "containerPort": 8001,
+          "protocol": "tcp"
+        }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/knok-websocket",
+          "awslogs-region": "ap-northeast-2",
+          "awslogs-stream-prefix": "ecs"
+        }
+      }
+    }
+  ]
+}

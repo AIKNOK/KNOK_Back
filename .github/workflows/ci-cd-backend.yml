@@ -1,0 +1,46 @@
+name: CI/CD for Django Backend
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "backend/**"
+      - "Dockerfile.backend"
+      - "requirements.txt"
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v1
+
+      - name: Build and Push Docker Image to ECR
+        env:
+          ECR_REPOSITORY: ${{ secrets.ECR_BACKEND_REPO }}
+          IMAGE_TAG: backend-${{ github.sha }}
+        run: |
+          docker build -f Dockerfile.backend -t $ECR_REPOSITORY:$IMAGE_TAG .
+          docker push $ECR_REPOSITORY:$IMAGE_TAG
+
+      - name: Deploy to ECS
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v1
+        with:
+          task-definition: ecs-task-def-backend.json
+          service: ${{ secrets.ECS_BACKEND_SERVICE }}
+          cluster: ${{ secrets.ECS_CLUSTER_NAME }}
+          image: ${{ secrets.ECR_BACKEND_REPO }}:backend-${{ github.sha }}
+          wait-for-service-stability: true

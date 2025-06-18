@@ -1557,3 +1557,8 @@ def decide_resume_question(request):
             "error": "Resume TTS 호출 중 예외 발생",
             "detail": str(e)
         }, status=500)
+
+
+def health_check(request):
+    return JsonResponse({"status": "ok"})
+  

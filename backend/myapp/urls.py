@@ -53,6 +53,7 @@ urlpatterns = [
 
     path('resume/tts/', decide_resume_question, name='resume_check'),
 
+    path("", health_check),
     # history 조회
     path('feedback/history/', get_feedback_history, name='feedback_history'),
     path("health/", health_check),

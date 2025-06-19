@@ -29,11 +29,7 @@ SECRET_KEY = 'django-insecure-acglm2hmr87(e-83fxvlq(reeayyih&s50qp1!3ilbj6!3(ymu
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = False
 
-ALLOWED_HOSTS = [
-    "api.ai-knok.com",  # 프론트에서 오는 요청 허용
-    "localhost",        # 로컬 개발용
-    "knok-backend-alb-25034041.ap-northeast-2.elb.amazonaws.com",  # ✅ ALB 상태 확인용
-]
+ALLOWED_HOSTS = ["*",]
 
 
 # Application definition

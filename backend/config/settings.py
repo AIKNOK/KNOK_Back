@@ -64,9 +64,11 @@ MIDDLEWARE = [
 
 
 CORS_ALLOWED_ORIGINS = [
-    "https://ai-knok.com",
-    "https://www.ai-knok.com",
+    "https://ai-knok.com",                # ✅ 프론트엔드 도메인
+    "https://www.ai-knok.com",            # ✅ 서브도메인도 같이
+    "https://api.ai-knok.com",            # ✅ API 요청용 도메인
 ]
+
 
 ROOT_URLCONF = 'config.urls'
 

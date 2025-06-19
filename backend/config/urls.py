@@ -17,9 +17,13 @@ Including another URLconf
 from django.contrib import admin
 from django.urls import path, include  # ← include 꼭 필요해요
 
+from myapp.views import (
+    health_check
+)
 
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('api/', include('myapp.urls')),  # ← 여기서 'api/'는 선택. 원하는 경로로 변경 가능
+    path("", health_check),
 ]
 

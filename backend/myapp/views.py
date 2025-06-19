@@ -1627,7 +1627,7 @@ def decide_resume_question(request):
         "Authorization": f"Bearer {token}"
     }
 
-    tts_url = "http://13.209.16.252:8002/api/generate-followup-question/tts/"
+    tts_url = "http://13.209.16.252:8002/api/generate-resume-question/"
     try:
         # 외부 POST 요청 (body 없음)
         tts_response = requests.post(tts_url, headers=headers)

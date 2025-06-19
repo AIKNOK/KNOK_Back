@@ -156,6 +156,8 @@ AWS_S3_CUSTOM_DOMAIN = f"{AWS_STORAGE_BUCKET_NAME}.s3.amazonaws.com"
 AWS_TTS_BUCKET_NAME = config("TTS_BUCKET_NAME")
 AWS_FOLLOWUP_QUESTION_BUCKET_NAME = config("AWS_FOLLOWUP_QUESTION_BUCKET_NAME")
 
+DEFAULT_FILE_STORAGE = 'storages.backends.s3boto3.S3Boto3Storage'
+
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': [
         'myapp.authentication.CognitoJWTAuthentication',

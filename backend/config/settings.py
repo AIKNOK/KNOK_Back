@@ -27,9 +27,9 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 SECRET_KEY = 'django-insecure-acglm2hmr87(e-83fxvlq(reeayyih&s50qp1!3ilbj6!3(ymu'
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = False
 
-ALLOWED_HOSTS = ['*']
+ALLOWED_HOSTS = ["api.ai-knok.com", "localhost"]
 
 
 # Application definition
@@ -58,15 +58,11 @@ MIDDLEWARE = [
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
 
+
 CORS_ALLOWED_ORIGINS = [
     "https://ai-knok.com",
     "https://www.ai-knok.com",
-    "http://localhost:5173"
 ]
-
-CSRF_TRUSTED_ORIGINS = {
-  "https://ai-knok.com"
-}
 
 ROOT_URLCONF = 'config.urls'
 
@@ -164,9 +160,6 @@ REST_FRAMEWORK = {
     ]
 }
 
-CORS_ALLOWED_ORIGINS = [
-    "http://localhost:5173",
-]
 
 CORS_ALLOW_CREDENTIALS = True
 

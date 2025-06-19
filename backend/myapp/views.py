@@ -878,13 +878,15 @@ def decide_followup_question(request):
         return Response({'error': 'Claude 호출 실패', 'detail': str(e)}, status=500)
 
     # 3. 새로운 follow-up 질문 번호 지정
+    base_str = str(base_question_number)
+
     suffix_numbers = [
         int(q.split('-')[1])
         for q in existing_question_numbers
-        if q.startswith(base_question_number + '-')
+        if q.startswith(base_str + '-')
     ]
     next_suffix = max(suffix_numbers, default=0) + 1
-    followup_question_number = f"{base_question_number}-{next_suffix}"
+    followup_question_number = f"{base_str}-{next_suffix}"
 
     # 4. S3에 질문 저장
     s3_client = boto3.client(
@@ -932,7 +934,8 @@ def decide_followup_question(request):
         'question_number': followup_question_number,
         'question': question,
         'audio_url': audio_url,
-        'matched_keywords': matched_keywords
+        'matched_keywords': matched_keywords,
+        'keywords': keywords
     })
 
 

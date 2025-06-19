@@ -404,7 +404,7 @@ AI가 생성한 질문:
     }
     try:
         tts_response = requests.post(
-            "http://43.203.222.186:8002/api/generate-resume-question/",
+            "http://13.209.16.252:8002/api/generate-resume-question/",
             headers=headers,
             timeout=30
         )
@@ -878,13 +878,15 @@ def decide_followup_question(request):
         return Response({'error': 'Claude 호출 실패', 'detail': str(e)}, status=500)
 
     # 3. 새로운 follow-up 질문 번호 지정
+    base_str = str(base_question_number)
+
     suffix_numbers = [
         int(q.split('-')[1])
         for q in existing_question_numbers
-        if q.startswith(base_question_number + '-')
+        if q.startswith(base_str + '-')
     ]
     next_suffix = max(suffix_numbers, default=0) + 1
-    followup_question_number = f"{base_question_number}-{next_suffix}"
+    followup_question_number = f"{base_str}-{next_suffix}"
 
     # 4. S3에 질문 저장
     s3_client = boto3.client(
@@ -912,7 +914,7 @@ def decide_followup_question(request):
         return Response({'error': 'S3 저장 실패', 'detail': str(e)}, status=500)
 
     # TTS 서버 호출
-    tts_url = "http://43.201.0.76:8002/api/generate-followup-question/tts/"
+    tts_url = "http://13.209.16.252:8002/api/generate-followup-question/tts/"
     try:
         tts_response = requests.post(tts_url, json={
             "question_number": followup_question_number,
@@ -932,7 +934,8 @@ def decide_followup_question(request):
         'question_number': followup_question_number,
         'question': question,
         'audio_url': audio_url,
-        'matched_keywords': matched_keywords
+        'matched_keywords': matched_keywords,
+        'keywords': keywords
     })
 
 
@@ -1249,9 +1252,14 @@ def get_all_questions_view(request):
     followup_questions = fetch_questions('knok-followup-questions')
 
     merged = {**base_questions, **followup_questions}
+
+    def safe_key(k):
+        parts = k.split('-')
+        return [(0, int(p)) if p.isdigit() else (1, p) for p in parts]
+    
     sorted_merged = dict(sorted(
         merged.items(),
-        key=lambda x: [int(part) if part.isdigit() else part for part in x[0].split('-')]
+        key=lambda x: safe_key(x[0])
     ))
 
     return Response({"questions": sorted_merged})
@@ -1534,7 +1542,7 @@ def decide_resume_question(request):
         "Authorization": f"Bearer {token}"
     }
 
-    tts_url = "http://43.203.222.186:8002/api/generate-followup-question/tts/"
+    tts_url = "http://13.209.16.252:8002/api/generate-followup-question/tts/"
     try:
         # 외부 POST 요청 (body 없음)
         tts_response = requests.post(tts_url, headers=headers)

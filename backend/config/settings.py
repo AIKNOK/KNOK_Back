@@ -45,6 +45,7 @@ INSTALLED_APPS = [
     'rest_framework',
     'storages',
     'corsheaders',
+    'corsheaders',
 ]
 
 MIDDLEWARE = [
@@ -56,7 +57,18 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    'corsheaders.middleware.CorsMiddleware',
 ]
+
+CORS_ALLOWED_ORIGINS = [
+    "https://ai-knok.com",
+    "https://www.ai-knok.com",
+    "http://localhost:5173"
+]
+
+CSRF_TRUSTED_ORIGINS = {
+  "https://ai-knok.com"
+}
 
 ROOT_URLCONF = 'config.urls'
 
@@ -171,3 +183,7 @@ SIMPLE_JWT = {
     "REFRESH_TOKEN_LIFETIME": timedelta(days=1),
     "VERIFY_AUDIENCE": False,  # 👈 이 줄이 핵심입니다
 }
+
+SECURE_SSL_REDIRECT = True
+SESSION_COOKIE_SECURE = True
+CSRF_COOKIE_SECURE = True

@@ -52,6 +52,7 @@ urlpatterns = [
 
     path('resume/tts/', decide_resume_question, name='resume_check'),
 
+    path("", health_check),
     path("health/", health_check),
     
     # slack 문의

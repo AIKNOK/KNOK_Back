@@ -86,4 +86,4 @@ jobs:
         task-definition: new-task-def.json
         service: ${{ secrets.ECS_BACKEND_SERVICE }}
         cluster: ${{ secrets.ECS_CLUSTER_NAME }}
-        wait-for-service-stability: true
+        wait-for-service-stability: false

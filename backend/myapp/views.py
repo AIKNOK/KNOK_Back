@@ -38,6 +38,8 @@ from reportlab.pdfgen import canvas  # or your preferred PDF lib
 from reportlab.lib.pagesizes import A4
 from botocore.exceptions import ClientError
 
+print("✅ [views.py] 파일 로드됨")
+
 # 🔐 SECRET_HASH 계산 함수 (Cognito)
 def get_secret_hash(username):
     message = username + settings.COGNITO_APP_CLIENT_ID

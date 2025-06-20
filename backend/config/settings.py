@@ -156,6 +156,14 @@ AWS_S3_CUSTOM_DOMAIN = "ai-knok.com"
 AWS_TTS_BUCKET_NAME = config("TTS_BUCKET_NAME")
 AWS_FOLLOWUP_QUESTION_BUCKET_NAME = config("AWS_FOLLOWUP_QUESTION_BUCKET_NAME")
 
+try:
+    print("✅ [settings.py] 환경변수 로드 완료")
+    print("  - S3 버킷 이름:", AWS_STORAGE_BUCKET_NAME)
+    print("  - 리전:", config('AWS_REGION'))
+    print("  - Cognito Client ID:", config('COGNITO_APP_CLIENT_ID'))
+except Exception as e:
+    print("❌ [settings.py] 환경변수 로드 실패:", e)
+
 DEFAULT_FILE_STORAGE = 'storages.backends.s3boto3.S3Boto3Storage'
 
 REST_FRAMEWORK = {

@@ -7,6 +7,8 @@ from rest_framework import status
 from pydub import AudioSegment
 from myapp.utils.keyword_extractor import extract_resume_keywords
 from myapp.utils.followup_logic import should_generate_followup
+from myapp.authentication import CognitoJWTAuthentication
+
 
 import requests
 import re
@@ -175,6 +177,7 @@ def logout_view(request):
 
 # 📤 이력서 업로드 API (S3 저장, DB 기록, 중복 업로드 차단)
 class ResumeUploadView(APIView):
+    authentication_classes = [CognitoJWTAuthentication]
     permission_classes = [IsAuthenticated]
 
     def post(self, request):

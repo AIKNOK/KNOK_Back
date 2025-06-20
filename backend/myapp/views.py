@@ -7,6 +7,7 @@ from rest_framework import status
 from pydub import AudioSegment
 from myapp.utils.keyword_extractor import extract_resume_keywords
 from myapp.utils.followup_logic import should_generate_followup
+from boto3.dynamodb.conditions import Key
 
 import requests
 import re
@@ -25,6 +26,7 @@ import moviepy.editor as mp
 import subprocess
 import os
 import traceback
+import uuid
 
 from django.conf import settings
 from .models import Resume
@@ -37,6 +39,8 @@ from datetime import timedelta
 from reportlab.pdfgen import canvas  # or your preferred PDF lib
 from reportlab.lib.pagesizes import A4
 from botocore.exceptions import ClientError
+from datetime import datetime
+from django.core.cache import cache
 
 # 🔐 SECRET_HASH 계산 함수 (Cognito)
 def get_secret_hash(username):
@@ -406,7 +410,7 @@ AI가 생성한 질문:
         tts_response = requests.post(
             "http://43.203.222.186:8002/api/generate-resume-question/",
             headers=headers,
-            timeout=30
+            timeout=60
         )
         if tts_response.status_code != 200:
             print("❌ TTS 생성 실패:", tts_response.text)
@@ -646,7 +650,7 @@ def analyze_voice_api(request):
     if not upload_id:
         return JsonResponse({'error': 'upload_id 필수'}, status=400)
     
-    bucket = 'live-stt'
+    bucket = settings.AWS_AUDIO_BUCKET_NAME
     email_prefix = request.user.email.split('@')[0]
     
     prefix = f"{email_prefix}/{upload_id}/wavs/"   # 여러 답변 오디오가 여기에 저장되어 있음
@@ -804,7 +808,27 @@ def generate_feedback_report(request):
     
     # 플레인 텍스트를 파싱해서 구조화된 dict로 변환
     feedback = parse_plain_feedback(raw_text)
-    # feedback = parse_claude_feedback_and_score(raw_text)
+    score = calculate_score(feedback["chart"])
+    emoji = "🙂" if score >= 80 else "😐" if score >= 60 else "😟"
+
+    # ✅ 캐시에 저장 (video_id 기준)
+    video_id = analysis.get("upload_id", "unknown_video_id")
+    cache_key = f"feedback_cache:{video_id}"
+    cache.set(cache_key, {
+        "user_email": user.email,
+        "score": score,
+        "emoji": emoji,
+    }, timeout=300) 
+
+    # DynamoDB에 저장
+    save_feedback_to_dynamodb(
+        user_email=user.email,
+        video_id=video_id,
+        emoji="🙂",  # 또는 chart 점수 기준으로 이모지 결정
+        total_score=score,
+        pdf_url="업로드 이후 저장된 PDF URL"
+    )
+    
     return Response(feedback)
 
     
@@ -1249,9 +1273,14 @@ def get_all_questions_view(request):
     followup_questions = fetch_questions('knok-followup-questions')
 
     merged = {**base_questions, **followup_questions}
+
+    def safe_key(k):
+        parts = k.split('-')
+        return [(0, int(p)) if p.isdigit() else (1, p) for p in parts]
+    
     sorted_merged = dict(sorted(
         merged.items(),
-        key=lambda x: [int(part) if part.isdigit() else part for part in x[0].split('-')]
+        key=lambda x: safe_key(x[0])
     ))
 
     return Response({"questions": sorted_merged})
@@ -1370,8 +1399,8 @@ def download_feedback_zip(request):
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def upload_feedback_pdf(request):
-    file = request.FILES.get("file")
-    video_id = request.POST.get("videoId")
+    file = request.FILES.get("pdf")
+    video_id = request.POST.get("video_id")
     if not file or not video_id:
         return Response({"error": "file, videoId 필수"}, status=400)
 
@@ -1386,7 +1415,68 @@ def upload_feedback_pdf(request):
                       ExtraArgs={"ContentType": "application/pdf"})
 
     url = f"https://{settings.AWS_CLIP_VIDEO_BUCKET_NAME}.s3.{settings.AWS_S3_REGION_NAME}.amazonaws.com/{pdf_key}"
+
+    # ✅ 캐시에서 점수/이모지 불러오기
+    cache_key = f"feedback_cache:{video_id}"
+    cached = cache.get(cache_key)
+    if not cached:
+        return Response({"error": "피드백 분석 정보가 만료되었거나 없습니다."}, status=400)
+
+    save_feedback_to_dynamodb(
+        user_email=cached["user_email"],
+        video_id=video_id,
+        total_score=cached["score"],
+        emoji=cached["emoji"],
+        pdf_url=url,
+    )
     return Response({"pdf_url": url})
+
+
+# feedback 관련 내용 DB에 업로드
+def save_feedback_to_dynamodb(user_email, video_id, emoji, total_score, pdf_url):
+    dynamodb = boto3.client('dynamodb', region_name='ap-northeast-2')
+    dynamodb.put_item(
+        TableName='feedback_reports',
+        Item={
+            'id': {'S': str(uuid.uuid4())},
+            'user_email': {'S': user_email},
+            'video_id': {'S': video_id},
+            'created_at': {'S': datetime.utcnow().isoformat()},
+            'total_score': {'N': str(total_score)},
+            'interviewer_emoji': {'S': emoji},
+            'pdf_url': {'S': pdf_url}
+        }
+    )
+
+
+# History 조회 API
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def get_feedback_history(request):
+    user_email = request.user.email
+    sort_by = request.GET.get("sort", "created_at")  
+    order = request.GET.get("order", "desc")
+    asc = True if order == "asc" else False
+
+    dynamodb = boto3.resource('dynamodb', region_name='ap-northeast-2')
+    table = dynamodb.Table('feedback_reports')
+
+    if sort_by == "score":
+        index_name = "GSI_user_email_score"
+    else:
+        index_name = "GSI_user_email_created_at"
+
+    key_condition = Key("user_email").eq(user_email)
+    response = table.query(
+        IndexName=index_name,
+        KeyConditionExpression=key_condition,
+        ScanIndexForward=asc
+    )
+
+    items = response.get("Items", [])
+
+    return Response(items)
+
 
 SLACK_WEBHOOK_URL = "https://hooks.slack.com/services/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"
 

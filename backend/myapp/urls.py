@@ -8,6 +8,7 @@ from .views import (
     download_feedback_zip,
     upload_feedback_pdf,
     send_to_slack,
+    get_feedback_history,
     health_check
 )
 
@@ -52,8 +53,10 @@ urlpatterns = [
 
     path('resume/tts/', decide_resume_question, name='resume_check'),
 
+    # history 조회
+    path('feedback/history/', get_feedback_history, name='feedback_history'),
     path("health/", health_check),
-    
+
     # slack 문의
     path('contact/', send_to_slack, name='send_to_slack'),
 

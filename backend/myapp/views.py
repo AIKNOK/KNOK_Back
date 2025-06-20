@@ -266,11 +266,9 @@ def get_resume_view(request):
 
         return Response({'file_url': resume.file_url}, status=200)
     except Exception as e:
-        import traceback
-        traceback.print_exc()
+        traceback.print_exc()  # ✅ 이게 있어야 CloudWatch에 에러 줄 번호와 원인이 찍힘
         return Response({'error': '서버 오류', 'detail': str(e)}, status=500)
-    
-    
+
 # 🧠 Claude에게 이력서 기반으로 질문 요청
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])

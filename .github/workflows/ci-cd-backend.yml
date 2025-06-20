@@ -87,3 +87,19 @@ jobs:
         service: ${{ secrets.ECS_BACKEND_SERVICE }}
         cluster: ${{ secrets.ECS_CLUSTER_NAME }}
         wait-for-service-stability: false
+
+    - name: Run Django migrations after deployment
+      run: |
+        aws ecs run-task \
+          --cluster ${{ secrets.ECS_CLUSTER_NAME }} \
+          --launch-type FARGATE \
+          --network-configuration "awsvpcConfiguration={subnets=[\"${{ secrets.ECS_SUBNET_1 }}\",\"${{ secrets.ECS_SUBNET_2 }}\"],securityGroups=[\"${{ secrets.ECS_SECURITY_GROUP }}\"],assignPublicIp=\"ENABLED\"}" \
+          --task-definition ${{ env.TASK_DEF_ARN }} \
+          --overrides '{
+            "containerOverrides": [
+              {
+                "name": "knok-backend",
+                "command": ["sh", "-c", "python3 manage.py migrate"]
+              }
+            ]
+          }'

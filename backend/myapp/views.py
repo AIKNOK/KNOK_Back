@@ -176,15 +176,22 @@ class ResumeUploadView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
+        print("📥 [ResumeUploadView] 업로드 요청 수신됨")
         # 1) 파일 유무 체크
         uploaded_file = request.FILES.get('resume')
         if not uploaded_file:
+            print("❌ 파일 없음: request.FILES =", request.FILES)
             return Response({"error": "파일이 없습니다."}, status=400)
 
         # ✅ 2) 사용자 이메일 + 원본 파일명으로 S3 경로 구성
+        if not request.user or not request.user.email:
+            print("❌ 사용자 인증 실패: request.user =", request.user)
+            return Response({"error": "인증된 사용자가 아닙니다."}, status=401)
+        
         email_prefix = request.user.email.split('@')[0]
         original_filename = uploaded_file.name
         key = f"resumes/{email_prefix}/{original_filename}"
+        print(f"📎 업로드 대상 key: {key}")
 
         s3 = boto3.client(
             's3',
@@ -195,10 +202,13 @@ class ResumeUploadView(APIView):
 
         try:
             s3.upload_fileobj(uploaded_file, settings.AWS_STORAGE_BUCKET_NAME, key)
+            print("✅ S3 업로드 성공")
         except Exception as e:
+            traceback.print_exc()
             return Response({"error": f"S3 업로드 실패: {str(e)}"}, status=500)
 
         file_url = f"https://{settings.AWS_S3_CUSTOM_DOMAIN}/{key}"
+        print(f"🔗 저장된 파일 URL: {file_url}")
 
         # ✅ 3) DB에도 업데이트 (이전 것 덮어씀)
         resume_obj, created = Resume.objects.update_or_create(

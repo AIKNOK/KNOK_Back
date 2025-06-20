@@ -251,7 +251,11 @@ class ResumeDeleteView(APIView):
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def get_resume_view(request):
-    print("📌 현재 로그인된 사용자:", request.user)
+    print("📌 현재 로그인된 사용자:", request.user, type(request.user))
+    
+    if not request.user or not request.user.is_authenticated:
+        return Response({'error': '인증된 사용자가 아닙니다.'}, status=401)
+
     try:
         resume = Resume.objects.get(user=request.user)
         return Response({'file_url': resume.file_url}, status=200)
@@ -260,7 +264,7 @@ def get_resume_view(request):
     except Exception as e:
         print("❌ Resume 조회 중 오류:", e)
         return Response({'error': str(e)}, status=500)
-
+    
 # 🧠 Claude에게 이력서 기반으로 질문 요청
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])

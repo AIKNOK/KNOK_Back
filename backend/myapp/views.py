@@ -252,6 +252,7 @@ class ResumeDeleteView(APIView):
 
 # 🧾 이력서 조회 API (새로고침 시 프론트에서 조회)
 @api_view(['GET'])
+@authentication_classes([CognitoJWTAuthentication])
 @permission_classes([IsAuthenticated])
 def get_resume_view(request):
     print("📌 현재 로그인된 사용자:", request.user, type(request.user))

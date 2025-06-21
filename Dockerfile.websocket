@@ -6,11 +6,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     build-essential \
     python3-dev \
-    && rm -rf /var/lib/apt/lists/*
+ && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-# 의존성 복사 및 설치
+# requirements.txt 복사 및 패키지 설치
 COPY requirements.txt .
 RUN pip install --upgrade pip && \
     pip install --no-cache-dir --prefix=/install -r requirements.txt
@@ -18,14 +18,18 @@ RUN pip install --upgrade pip && \
 # ⚙️ Stage 2: 실행 환경
 FROM python:3.11-slim
 
-RUN apt-get update && apt-get install -y ffmpeg && rm -rf /var/lib/apt/lists/*
+# 필요한 시스템 패키지만 설치 (ffmpeg만)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ffmpeg \
+ && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 
-# 빌드 스테이지에서 설치된 패키지 복사
+# 빌드된 패키지 복사
 COPY --from=build /install /usr/local
 
 # 애플리케이션 복사
 COPY websocket/ ./websocket/
 
-# 서버 실행
+# 유니콘 서버 실행
 CMD ["uvicorn", "websocket.fastapi_server:app", "--host", "0.0.0.0", "--port", "8001"]

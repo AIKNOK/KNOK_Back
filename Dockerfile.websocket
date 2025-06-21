@@ -1,18 +1,23 @@
-# Dockerfile.websocket
-FROM python:3.11-slim
-
-# ffmpeg 및 webrtcvad 빌드 도구 추가
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    ffmpeg \
-    build-essential \
-    python3-dev \
-    && rm -rf /var/lib/apt/lists/*
+# 빌드 단계
+FROM python:3.11-slim AS builder
 
 WORKDIR /app
 
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    python3-dev \
+    ffmpeg
 
+COPY requirements.txt .
+RUN pip install --user --no-warn-script-location --no-cache-dir -r requirements.txt
+
+# 실행 단계
+FROM python:3.11-slim AS runtime
+
+ENV PATH=/root/.local/bin:$PATH
+WORKDIR /app
+
+COPY --from=builder /root/.local /root/.local
 COPY websocket/ ./websocket/
 
 CMD ["uvicorn", "websocket.fastapi_server:app", "--host", "0.0.0.0", "--port", "8001"]

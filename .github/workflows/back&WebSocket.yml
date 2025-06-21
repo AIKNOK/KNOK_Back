@@ -10,7 +10,8 @@ env:
   ECR_WEBSOCKET_REPO: knok-websocket
   ECS_BACKEND_SERVICE: knok-backend-service
   ECS_WEBSOCKET_SERVICE: knok-websocket-service
-  ECS_CLUSTER: knok-cluster
+  ECS_CLUSTER: knok-cluster-pri
+  AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
 
 jobs:
   deploy:
@@ -33,21 +34,37 @@ jobs:
     - name: Build and push Backend image
       run: |
         docker build -t $ECR_BACKEND_REPO -f Dockerfile.backend .
-        docker tag $ECR_BACKEND_REPO:latest ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/$ECR_BACKEND_REPO:latest
-        docker push ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/$ECR_BACKEND_REPO:latest
+        docker tag $ECR_BACKEND_REPO:latest $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_BACKEND_REPO:latest
+        docker push $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_BACKEND_REPO:latest
 
     - name: Build and push WebSocket image
       run: |
         docker build -t $ECR_WEBSOCKET_REPO -f Dockerfile.websocket .
-        docker tag $ECR_WEBSOCKET_REPO:latest ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/$ECR_WEBSOCKET_REPO:latest
-        docker push ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/$ECR_WEBSOCKET_REPO:latest
+        docker tag $ECR_WEBSOCKET_REPO:latest $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_WEBSOCKET_REPO:latest
+        docker push $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_WEBSOCKET_REPO:latest
+
+    - name: Render backend task definition
+      id: render-backend
+      uses: aws-actions/amazon-ecs-render-task-definition@v1
+      with:
+        task-definition: ecs-task-def-backend.json
+        container-name: knok-backend
+        image: $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_BACKEND_REPO:latest
+
+    - name: Render websocket task definition
+      id: render-websocket
+      uses: aws-actions/amazon-ecs-render-task-definition@v1
+      with:
+        task-definition: ecs-task-def-websocket.json
+        container-name: knok-websocket
+        image: $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_WEBSOCKET_REPO:latest
 
     - name: Deploy Backend to ECS
       uses: aws-actions/amazon-ecs-deploy-task-definition@v1
       with:
         cluster: ${{ env.ECS_CLUSTER }}
         service: ${{ env.ECS_BACKEND_SERVICE }}
-        task-definition: ecs-task-def-backend.json
+        task-definition: ${{ steps.render-backend.outputs.task-definition }}
         wait-for-service-stability: true
 
     - name: Deploy WebSocket to ECS
@@ -55,5 +72,5 @@ jobs:
       with:
         cluster: ${{ env.ECS_CLUSTER }}
         service: ${{ env.ECS_WEBSOCKET_SERVICE }}
-        task-definition: ecs-task-def-websocket.json
+        task-definition: ${{ steps.render-websocket.outputs.task-definition }}
         wait-for-service-stability: true

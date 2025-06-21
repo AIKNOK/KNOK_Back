@@ -1,27 +1,31 @@
-# Dockerfile.backend
-
-FROM python:3.10-slim
+# 빌드 단계 (개발 도구 포함)
+FROM python:3.10-slim AS builder
 
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 
-# 필수 시스템 패키지 설치
-RUN apt-get update && apt-get install -y gcc libpq-dev
-
-# 작업 디렉토리 생성
 WORKDIR /app
 
-# requirements 설치
-COPY requirements.txt /app/
-RUN pip install --upgrade pip && pip install -r requirements.txt
+# 시스템 패키지 및 디펜던시 설치
+RUN apt-get update && apt-get install -y gcc libpq-dev
 
-# 소스 복사
-COPY . /app/
+COPY requirements.txt .
+RUN pip install --upgrade pip && pip install --user --no-warn-script-location -r requirements.txt
 
-# Django collectstatic, migrate 등은 ECS에서 실행하거나 ENTRYPOINT에 포함할 수 있음
+# 실제 실행 단계
+FROM python:3.10-slim AS runtime
 
-# 포트 (예: 8000)
+ENV PATH=/root/.local/bin:$PATH
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+
+WORKDIR /app
+
+COPY --from=builder /root/.local /root/.local
+COPY --from=builder /app /app
+
+COPY . .
+
 EXPOSE 8000
 
-# 서버 실행
 CMD ["gunicorn", "myproject.wsgi:application", "--bind", "0.0.0.0:8000"]

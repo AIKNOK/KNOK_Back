@@ -1,31 +1,39 @@
-# 빌드 단계 (개발 도구 포함)
-FROM python:3.10-slim AS builder
+# ⚙️ Stage 1: 빌드 환경
+FROM python:3.10-slim AS build
 
-ENV PYTHONDONTWRITEBYTECODE=1
-ENV PYTHONUNBUFFERED=1
-
-WORKDIR /app
-
-# 시스템 패키지 및 디펜던시 설치
-RUN apt-get update && apt-get install -y gcc libpq-dev
-
-COPY requirements.txt .
-RUN pip install --upgrade pip && pip install --user --no-warn-script-location -r requirements.txt
-
-# 실제 실행 단계
-FROM python:3.10-slim AS runtime
-
-ENV PATH=/root/.local/bin:$PATH
-ENV PYTHONDONTWRITEBYTECODE=1
-ENV PYTHONUNBUFFERED=1
+# 시스템 패키지 설치
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc \
+    libpq-dev \
+ && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-COPY --from=builder /root/.local /root/.local
-COPY --from=builder /app /app
+# 🔹 Backend 전용 requirements 복사
+COPY requirements.backend.txt .
 
-COPY . .
+# 패키지 설치 (로컬 prefix로)
+RUN pip install --upgrade pip && \
+    pip install --no-cache-dir --prefix=/install -r requirements.backend.txt
 
+# ⚙️ Stage 2: 실행 환경
+FROM python:3.10-slim
+
+# 시스템 패키지 설치 (최소화)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libpq-dev \
+ && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# 빌드된 패키지 복사
+COPY --from=build /install /usr/local
+
+# 소스 코드 복사
+COPY . /app/
+
+# 포트 노출 (예: gunicorn용)
 EXPOSE 8000
 
+# Gunicorn 실행
 CMD ["gunicorn", "myproject.wsgi:application", "--bind", "0.0.0.0:8000"]

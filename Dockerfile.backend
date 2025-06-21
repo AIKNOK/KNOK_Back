@@ -1,18 +1,27 @@
 # Dockerfile.backend
-FROM python:3.11-slim
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
-    python3-dev \
-    ffmpeg \
-    && rm -rf /var/lib/apt/lists/*
+FROM python:3.10-slim
 
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+
+# 필수 시스템 패키지 설치
+RUN apt-get update && apt-get install -y gcc libpq-dev
+
+# 작업 디렉토리 생성
 WORKDIR /app
 
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# requirements 설치
+COPY requirements.txt /app/
+RUN pip install --upgrade pip && pip install -r requirements.txt
 
-COPY backend/ ./backend/
-WORKDIR /app/backend
+# 소스 복사
+COPY . /app/
 
-CMD ["gunicorn", "config.wsgi:application", "--bind", "0.0.0.0:8000", "--workers=1", "--timeout=90"]
+# Django collectstatic, migrate 등은 ECS에서 실행하거나 ENTRYPOINT에 포함할 수 있음
+
+# 포트 (예: 8000)
+EXPOSE 8000
+
+# 서버 실행
+CMD ["gunicorn", "myproject.wsgi:application", "--bind", "0.0.0.0:8000"]

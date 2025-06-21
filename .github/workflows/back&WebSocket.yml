@@ -49,7 +49,7 @@ jobs:
       with:
         task-definition: ecs-task-def-backend.json
         container-name: knok-backend
-        image: $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_BACKEND_REPO:latest
+        image: ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_BACKEND_REPO }}:latest
 
     - name: Render websocket task definition
       id: render-websocket
@@ -57,7 +57,7 @@ jobs:
       with:
         task-definition: ecs-task-def-websocket.json
         container-name: knok-websocket
-        image: $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_WEBSOCKET_REPO:latest
+        image: ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_WEBSOCKET_REPO }}:latest
 
     - name: Deploy Backend to ECS
       uses: aws-actions/amazon-ecs-deploy-task-definition@v1

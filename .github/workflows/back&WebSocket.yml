@@ -31,36 +31,21 @@ jobs:
     - name: Login to Amazon ECR
       uses: aws-actions/amazon-ecr-login@v1
 
-    - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v2
-
-    - name: Cache Docker layers
-      uses: actions/cache@v3
-      with:
-        path: /tmp/.buildx-cache
-        key: ${{ runner.os }}-buildx-${{ github.sha }}
-        restore-keys: |
-          ${{ runner.os }}-buildx-
+    # ✅ Docker 디스크 공간 정리
+    - name: Free disk space before Docker build
+      run: docker system prune -af
 
     - name: Build and push Backend image
-      uses: docker/build-push-action@v4
-      with:
-        context: .
-        file: Dockerfile.backend
-        push: true
-        tags: ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_BACKEND_REPO }}:latest
-        cache-from: type=local,src=/tmp/.buildx-cache
-        cache-to: type=local,dest=/tmp/.buildx-cache
+      run: |
+        docker build -t $ECR_BACKEND_REPO -f Dockerfile.backend .
+        docker tag $ECR_BACKEND_REPO:latest $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_BACKEND_REPO:latest
+        docker push $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_BACKEND_REPO:latest
 
     - name: Build and push WebSocket image
-      uses: docker/build-push-action@v4
-      with:
-        context: .
-        file: Dockerfile.websocket
-        push: true
-        tags: ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_WEBSOCKET_REPO }}:latest
-        cache-from: type=local,src=/tmp/.buildx-cache
-        cache-to: type=local,dest=/tmp/.buildx-cache
+      run: |
+        docker build -t $ECR_WEBSOCKET_REPO -f Dockerfile.websocket .
+        docker tag $ECR_WEBSOCKET_REPO:latest $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_WEBSOCKET_REPO:latest
+        docker push $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_WEBSOCKET_REPO:latest
 
     - name: Render backend task definition
       id: render-backend

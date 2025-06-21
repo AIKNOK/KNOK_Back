@@ -31,7 +31,6 @@ jobs:
     - name: Login to Amazon ECR
       uses: aws-actions/amazon-ecr-login@v1
 
-    # ✅ Docker 디스크 공간 정리
     - name: Free disk space before Docker build
       run: docker system prune -af
 
@@ -69,7 +68,7 @@ jobs:
         cluster: ${{ env.ECS_CLUSTER }}
         service: ${{ env.ECS_BACKEND_SERVICE }}
         task-definition: ${{ steps.render-backend.outputs.task-definition }}
-        wait-for-service-stability: true
+        wait-for-service-stability: false  # ✅ 대기 없이 배포 후 진행
 
     - name: Deploy WebSocket to ECS
       uses: aws-actions/amazon-ecs-deploy-task-definition@v1
@@ -77,4 +76,4 @@ jobs:
         cluster: ${{ env.ECS_CLUSTER }}
         service: ${{ env.ECS_WEBSOCKET_SERVICE }}
         task-definition: ${{ steps.render-websocket.outputs.task-definition }}
-        wait-for-service-stability: true
+        wait-for-service-stability: false  # ✅ 대기 없이 배포 후 진행

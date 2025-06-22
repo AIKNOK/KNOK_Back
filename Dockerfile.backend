@@ -1,3 +1,5 @@
+# Dockerfile.backend
+
 FROM python:3.10-slim
 
 # 시스템 패키지 설치
@@ -5,19 +7,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq-dev gcc \
  && rm -rf /var/lib/apt/lists/*
 
-# 작업 디렉토리 설정
-WORKDIR /app/backend  # ✅ backend가 루트가 되도록 설정
+# 작업 디렉토리 지정 (✅ config가 포함된 backend로 설정)
+WORKDIR /app/backend
 
-# requirements 설치
+# requirements 복사 및 설치
 COPY requirements.backend.txt /app/
-RUN pip install --upgrade pip && \
-    pip install --no-cache-dir -r /app/requirements.backend.txt
+RUN pip install --upgrade pip && pip install --no-cache-dir -r /app/requirements.backend.txt
 
-# backend 폴더 전체 복사
-COPY backend/ /app/backend/
+# 전체 backend 복사 (✅ config 포함)
+COPY backend /app/backend
 
-# 포트 노출
+# 포트 노출 (선택)
 EXPOSE 8000
 
-# Gunicorn 실행
+# Gunicorn 실행 (✅ config.wsgi 모듈 인식 가능)
 CMD ["gunicorn", "config.wsgi:application", "--bind", "0.0.0.0:8000"]

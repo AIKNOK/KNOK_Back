@@ -1,17 +1,18 @@
-# 1단계: 의존성 빌드
 FROM python:3.10-slim AS builder
 
 WORKDIR /app
 
-# ✅ gcc 추가
+# webrtcvad 설치용 gcc 추가
 RUN apt-get update && apt-get install -y --no-install-recommends gcc && \
     rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
-RUN pip install --upgrade pip && \
-    pip wheel --no-cache-dir --wheel-dir /wheels -r requirements.txt
 
-# 2단계: 실행 이미지
+# webrtcvad은 wheel로 안 되므로 pip install
+RUN pip install --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt
+
+# 실행 이미지
 FROM python:3.10-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -22,8 +23,9 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends gcc && \
     rm -rf /var/lib/apt/lists/*
 
-COPY --from=builder /wheels /wheels
-RUN pip install --no-cache-dir --no-index --find-links=/wheels /wheels/*
+# site-packages 복사
+COPY --from=builder /usr/local/lib/python3.10/site-packages /usr/local/lib/python3.10/site-packages
+COPY --from=builder /usr/local/bin /usr/local/bin
 
 COPY websocket ./websocket
 

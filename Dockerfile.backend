@@ -15,20 +15,20 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-# 필요한 시스템 패키지 설치
+# 시스템 패키지 설치 (PostgreSQL 연동용 등)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq-dev gcc && \
     rm -rf /var/lib/apt/lists/*
 
-# 빌드된 wheel 복사 및 설치
+# 휠 캐시 설치
 COPY --from=builder /wheels /wheels
 RUN pip install --no-cache-dir --no-index --find-links=/wheels /wheels/*
 
-# 소스코드 복사
+# Django 앱 코드 복사
 COPY backend ./backend
-COPY manage.py .
+COPY backend/manage.py .
 
 EXPOSE 8000
 
-# 마이그레이션 후 gunicorn 실행
+# 마이그레이션 후 Gunicorn 실행
 CMD ["sh", "-c", "python manage.py migrate && gunicorn backend.config.wsgi:application --bind 0.0.0.0:8000"]

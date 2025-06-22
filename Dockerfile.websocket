@@ -1,34 +1,30 @@
-# ⚙️ Stage 1: 빌드 환경
-FROM python:3.11-slim AS build
-
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    ffmpeg \
-    build-essential \
-    python3-dev \
- && rm -rf /var/lib/apt/lists/*
+# 1단계: 의존성 빌드
+FROM python:3.10-slim AS builder
 
 WORKDIR /app
 
-COPY requirements.websocket.txt .
-
+COPY requirements.txt .
 RUN pip install --upgrade pip && \
-    pip install --no-cache-dir --prefix=/install -r requirements.websocket.txt
+    pip wheel --no-cache-dir --wheel-dir /wheels -r requirements.txt
 
-# ⚙️ Stage 2: 실행 환경
-FROM python:3.11-slim
+# 2단계: 실행 이미지
+FROM python:3.10-slim
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    ffmpeg \
- && rm -rf /var/lib/apt/lists/*
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
 
 WORKDIR /app
 
-COPY --from=build /install /usr/local
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc && \
+    rm -rf /var/lib/apt/lists/*
 
-# ✅ 전체 코드 복사 또는 필요한 루트 폴더 복사
-COPY websocket/ ./websocket/
+COPY --from=builder /wheels /wheels
+RUN pip install --no-cache-dir --no-index --find-links=/wheels /wheels/*
 
-# ✅ PYTHONPATH 명시
-ENV PYTHONPATH=/app
+COPY websocket ./websocket
+COPY .env .
+
+EXPOSE 8001
 
 CMD ["uvicorn", "websocket.fastapi_server:app", "--host", "0.0.0.0", "--port", "8001"]

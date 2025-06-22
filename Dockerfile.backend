@@ -3,11 +3,15 @@ FROM python:3.10-slim AS builder
 WORKDIR /app
 
 COPY requirements.txt .
-RUN apt-get update && apt-get install -y --no-install-recommends gcc libpq-dev && \
-    rm -rf /var/lib/apt/lists/* && \
-    pip install --upgrade pip && \
-    pip install --no-cache-dir -r requirements.txt
 
+# 필수 시스템 패키지 설치
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc g++ make libpq-dev python3-dev libffi-dev libsndfile1 ffmpeg libgl1 \
+ && rm -rf /var/lib/apt/lists/* \
+ && pip install --upgrade pip \
+ && pip install --no-cache-dir -r requirements.txt
+
+# 런타임 이미지
 FROM python:3.10-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -15,12 +19,16 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-RUN apt-get update && apt-get install -y --no-install-recommends gcc libpq-dev && \
-    rm -rf /var/lib/apt/lists/*
+# 런타임에 필요한 시스템 패키지만 최소 설치
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libpq-dev libsndfile1 ffmpeg libgl1 \
+ && rm -rf /var/lib/apt/lists/*
 
+# 빌드된 패키지 복사
 COPY --from=builder /usr/local/lib/python3.10/site-packages /usr/local/lib/python3.10/site-packages
 COPY --from=builder /usr/local/bin /usr/local/bin
 
+# 소스 코드 복사
 COPY backend ./backend
 COPY backend/manage.py .
 

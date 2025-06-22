@@ -1,7 +1,6 @@
 # ⚙️ Stage 1: 빌드 환경
 FROM python:3.11-slim AS build
 
-# 시스템 패키지 설치
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     build-essential \
@@ -10,28 +9,26 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-# 🎯 WebSocket 전용 requirements 복사
 COPY requirements.websocket.txt .
 
-# 필요한 패키지만 설치
 RUN pip install --upgrade pip && \
     pip install --no-cache-dir --prefix=/install -r requirements.websocket.txt
 
 # ⚙️ Stage 2: 실행 환경
 FROM python:3.11-slim
 
-# 최소 시스템 패키지 설치
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
  && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-# 빌드된 패키지 복사
 COPY --from=build /install /usr/local
 
-# 앱 복사
+# ✅ 전체 코드 복사 또는 필요한 루트 폴더 복사
 COPY websocket/ ./websocket/
 
-# 서버 실행
+# ✅ PYTHONPATH 명시
+ENV PYTHONPATH=/app
+
 CMD ["uvicorn", "websocket.fastapi_server:app", "--host", "0.0.0.0", "--port", "8001"]

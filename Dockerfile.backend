@@ -15,7 +15,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 FROM python:3.10-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
+    PYTHONUNBUFFERED=1 \
+    PYTHONPATH="/app/backend"     
 
 WORKDIR /app
 
@@ -26,13 +27,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY --from=builder /usr/local/lib/python3.10/site-packages /usr/local/lib/python3.10/site-packages
 COPY --from=builder /usr/local/bin /usr/local/bin
 
+# ✅ backend 디렉토리와 그 안의 manage.py 포함
 COPY backend ./backend
-COPY backend/manage.py .
-
-# ✅ PYTHONPATH를 설정하여 backend를 루트로 인식
-ENV PYTHONPATH="/app/backend"
 
 EXPOSE 8000
 
-# ✅ 이제 config.settings를 찾을 수 있음
-CMD ["sh", "-c", "python manage.py migrate && gunicorn config.wsgi:application --bind 0.0.0.0:8000"]
+CMD ["sh", "-c", "cd backend && python manage.py migrate && gunicorn config.wsgi:application --bind 0.0.0.0:8000"]

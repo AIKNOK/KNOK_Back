@@ -2,14 +2,16 @@ FROM python:3.10-slim AS builder
 
 WORKDIR /app
 
-COPY requirements.txt .
+# requirements 파일 복사
+COPY requirements.backend.txt requirements.backend.txt
+COPY requirements.common.txt requirements.common.txt
 
 # 필수 시스템 패키지 설치
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc g++ make libpq-dev python3-dev libffi-dev libsndfile1 ffmpeg libgl1 \
  && rm -rf /var/lib/apt/lists/* \
  && pip install --upgrade pip \
- && pip install --no-cache-dir -r requirements.txt
+ && pip install --no-cache-dir -r requirements.backend.txt
 
 # 런타임 이미지
 FROM python:3.10-slim

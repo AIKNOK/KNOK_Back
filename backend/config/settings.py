@@ -14,7 +14,11 @@ from pathlib import Path
 from decouple import config
 from datetime import timedelta
 from corsheaders.defaults import default_headers
+from dotenv import load_dotenv
 
+
+# .env 직접 로드
+load_dotenv(dotenv_path=Path(__file__).resolve().parent.parent / ".env")
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent

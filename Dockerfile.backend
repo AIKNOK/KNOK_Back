@@ -1,12 +1,10 @@
-# Dockerfile.backend
-
 FROM python:3.10-slim AS builder
 
 WORKDIR /app
 
-# requirements 파일 복사 및 설치
 COPY requirements.backend.txt ./
 COPY requirements.common.txt ./
+
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc g++ make libpq-dev python3-dev libffi-dev libsndfile1 ffmpeg libgl1 \
  && rm -rf /var/lib/apt/lists/* \
@@ -25,18 +23,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq-dev libsndfile1 ffmpeg libgl1 \
  && rm -rf /var/lib/apt/lists/*
 
-# site-packages 복사
 COPY --from=builder /usr/local/lib/python3.10/site-packages /usr/local/lib/python3.10/site-packages
 COPY --from=builder /usr/local/bin /usr/local/bin
 
-# 백엔드 코드 복사
 COPY backend ./backend
 COPY backend/manage.py .
 
-# ✅ config가 포함된 backend를 import root로 사용
-WORKDIR /app/backend
+# ✅ PYTHONPATH를 설정하여 backend를 루트로 인식
+ENV PYTHONPATH="/app/backend"
 
 EXPOSE 8000
 
-# ✅ gunicorn은 config.wsgi를 기준으로 실행
-CMD ["sh", "-c", "python ../manage.py migrate && gunicorn config.wsgi:application --bind 0.0.0.0:8000"]
+# ✅ 이제 config.settings를 찾을 수 있음
+CMD ["sh", "-c", "python manage.py migrate && gunicorn config.wsgi:application --bind 0.0.0.0:8000"]

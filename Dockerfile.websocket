@@ -2,17 +2,18 @@ FROM python:3.10-slim AS builder
 
 WORKDIR /app
 
-# webrtcvad 설치용 gcc 추가
-RUN apt-get update && apt-get install -y --no-install-recommends gcc && \
-    rm -rf /var/lib/apt/lists/*
+# ✅ webrtcvad 및 C 확장 빌드용 모든 패키지 설치
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc g++ make python3-dev libffi-dev build-essential \
+ && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
 
-# webrtcvad은 wheel로 안 되므로 pip install
-RUN pip install --upgrade pip && \
+# ✅ 빌드 필수 패키지 설치
+RUN pip install --upgrade pip setuptools wheel build && \
     pip install --no-cache-dir -r requirements.txt
 
-# 실행 이미지
+# 2단계: 런타임 이미지
 FROM python:3.10-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -20,7 +21,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-RUN apt-get update && apt-get install -y --no-install-recommends gcc && \
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc libffi-dev && \
     rm -rf /var/lib/apt/lists/*
 
 # site-packages 복사

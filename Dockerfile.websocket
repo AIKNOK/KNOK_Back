@@ -3,6 +3,10 @@ FROM python:3.10-slim AS builder
 
 WORKDIR /app
 
+# ✅ gcc 추가
+RUN apt-get update && apt-get install -y --no-install-recommends gcc && \
+    rm -rf /var/lib/apt/lists/*
+
 COPY requirements.txt .
 RUN pip install --upgrade pip && \
     pip wheel --no-cache-dir --wheel-dir /wheels -r requirements.txt
@@ -15,19 +19,14 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    gcc && \
+RUN apt-get update && apt-get install -y --no-install-recommends gcc && \
     rm -rf /var/lib/apt/lists/*
 
-# 휠 복사 및 설치
 COPY --from=builder /wheels /wheels
 RUN pip install --no-cache-dir --no-index --find-links=/wheels /wheels/*
 
-# 코드 복사
 COPY websocket ./websocket
-# COPY .env .   ← ❌ 제거 또는 주석 처리
 
 EXPOSE 8001
 
-# FastAPI 서버 실행
 CMD ["uvicorn", "websocket.fastapi_server:app", "--host", "0.0.0.0", "--port", "8001"]

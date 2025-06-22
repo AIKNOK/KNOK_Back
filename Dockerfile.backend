@@ -1,4 +1,4 @@
-# 1단계: 빌드 의존성 설치
+# 1단계: 의존성 빌드
 FROM python:3.10-slim AS builder
 
 WORKDIR /app
@@ -7,7 +7,7 @@ COPY requirements.txt .
 RUN pip install --upgrade pip && \
     pip wheel --no-cache-dir --wheel-dir /wheels -r requirements.txt
 
-# 2단계: 실행 이미지
+# 2단계: 실행용 이미지
 FROM python:3.10-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -15,20 +15,20 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-# 런타임에 필요한 시스템 패키지 설치 (PostgreSQL 등 추가 가능)
+# 필요한 시스템 패키지 설치
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq-dev gcc && \
     rm -rf /var/lib/apt/lists/*
 
-# wheel 캐시 복사 후 설치
+# 빌드된 wheel 복사 및 설치
 COPY --from=builder /wheels /wheels
 RUN pip install --no-cache-dir --no-index --find-links=/wheels /wheels/*
 
-# 코드 복사
+# 소스코드 복사
 COPY backend ./backend
 COPY manage.py .
-COPY .env .
 
 EXPOSE 8000
 
+# 마이그레이션 후 gunicorn 실행
 CMD ["sh", "-c", "python manage.py migrate && gunicorn backend.config.wsgi:application --bind 0.0.0.0:8000"]

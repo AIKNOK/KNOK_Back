@@ -39,6 +39,9 @@ from datetime import timedelta
 from reportlab.pdfgen import canvas  # or your preferred PDF lib
 from reportlab.lib.pagesizes import A4
 from botocore.exceptions import ClientError
+from django.views.decorators.http import require_GET
+from django.views.decorators.http import require_http_methods
+
 
 print("✅ [views.py] 파일 로드됨")
 
@@ -1599,6 +1602,7 @@ def decide_resume_question(request):
             "detail": str(e)
         }, status=500)
 
-
+@csrf_exempt
+@require_http_methods(["GET", "HEAD"])
 def health_check(request):
     return JsonResponse({"status": "ok"})

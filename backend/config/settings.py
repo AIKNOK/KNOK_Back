@@ -11,15 +11,10 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 """
 
 from pathlib import Path
-from decouple import config
 from datetime import timedelta
 from corsheaders.defaults import default_headers
-from dotenv import load_dotenv
 import os
 
-
-# .env 직접 로드
-load_dotenv(dotenv_path=Path(__file__).resolve().parent.parent / ".env")
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -164,10 +159,11 @@ AWS_FOLLOWUP_QUESTION_BUCKET_NAME = os.environ.get("AWS_FOLLOWUP_QUESTION_BUCKET
 try:
     print("✅ [settings.py] 환경변수 로드 완료")
     print("  - S3 버킷 이름:", AWS_STORAGE_BUCKET_NAME)
-    print("  - 리전:", config('AWS_REGION'))
-    print("  - Cognito Client ID:", config('COGNITO_APP_CLIENT_ID'))
+    print("  - 리전:", AWS_REGION)
+    print("  - Cognito Client ID:", COGNITO_APP_CLIENT_ID)
 except Exception as e:
     print("❌ [settings.py] 환경변수 로드 실패:", e)
+
 
 DEFAULT_FILE_STORAGE = 'storages.backends.s3boto3.S3Boto3Storage'
 

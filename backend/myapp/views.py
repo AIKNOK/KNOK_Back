@@ -938,30 +938,38 @@ def decide_followup_question(request):
     except Exception as e:
         return Response({'error': 'S3 저장 실패', 'detail': str(e)}, status=500)
 
-    # TTS 서버 호출
-    tts_url = "http://13.209.16.252:8002/api/generate-followup-question/tts/"
-    try:
-        tts_response = requests.post(tts_url, json={
-            "question_number": followup_question_number,
-            "text": question
-        },
-        headers=headers
-        )
-        if tts_response.status_code != 200:
-            raise Exception(tts_response.text)
-        tts_result = tts_response.json()
-        audio_url = tts_result.get("file_url")
-    except Exception as e:
-        return Response({'error': 'TTS 호출 실패', 'detail': str(e)}, status=500)
 
-    return Response({
-        'followup': True,
-        'question_number': followup_question_number,
-        'question': question,
-        'audio_url': audio_url,
-        'matched_keywords': matched_keywords,
-        'keywords': keywords
-    })
+    sqs = boto3.client('sqs', region_name='ap-northeast-2')  # region은 실제 리전에 맞게 수정
+
+    # SQS URL 정의
+    QUEUE_URL = settings.AWS_SIMPLE_QUEUE_SERVICE
+
+    email = request.user.email.split('@')[0]
+
+    # SQS 메시지 구성 및 전달
+    message = {
+        "question_number": followup_question_number,
+        "text": question,
+        "headers" : headers
+    }
+
+    try:
+        response = sqs.send_message(
+            QueueUrl=QUEUE_URL,
+            MessageBody=json.dumps(message),
+            MessageGroupId=email,
+            MessageDeduplicationId=f"{email}-{int(time.time() * 1000)}"
+        )
+        return Response({
+            "message": "SQS에 요청 성공",
+            "sqs_message_id": response['MessageId']
+        }, status=200)
+
+    except Exception as e:
+        return Response({
+            "error": "SQS 전송 중 예외 발생",
+            "detail": str(e)
+        }, status=500)
 
 
 

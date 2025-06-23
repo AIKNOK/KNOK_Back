@@ -58,12 +58,21 @@ MIDDLEWARE = [
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
 
+CORS_ALLOW_ALL_ORIGINS = True
 
 CORS_ALLOWED_ORIGINS = [
-    "https://ai-knok.com",                # ✅ 프론트엔드 도메인
-    "https://www.ai-knok.com",            # ✅ 서브도메인도 같이
-    "https://api.ai-knok.com",            # ✅ API 요청용 도메인
+    "https://ai-knok.com",
+    "https://www.ai-knok.com",           
+    "https://api.ai-knok.com",  
 ]
+
+CORS_ALLOW_CREDENTIALS = True
+
+#CORS_ALLOWED_ORIGINS = [
+   # "https://ai-knok.com",                # ✅ 프론트엔드 도메인
+  #  "https://www.ai-knok.com",            # ✅ 서브도메인도 같이
+ #   "https://api.ai-knok.com",            # ✅ API 요청용 도메인
+#]
 
 
 ROOT_URLCONF = 'config.urls'
@@ -190,6 +199,6 @@ SIMPLE_JWT = {
 
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 
-SECURE_SSL_REDIRECT = True
-SESSION_COOKIE_SECURE = True
-CSRF_COOKIE_SECURE = True
+SECURE_SSL_REDIRECT = False
+SESSION_COOKIE_SECURE = False
+CSRF_COOKIE_SECURE = False

@@ -3,13 +3,14 @@ from . import views
 from .views import (
     decide_followup_question,
     generate_feedback_report,
-    decide_resume_question,
     get_ordered_question_audio,
     download_feedback_zip,
     upload_feedback_pdf,
+    get_feedback_history,
     send_to_slack,
     get_feedback_history,
-    health_check
+    health_check,
+    get_signed_pdf_url
 )
 
 urlpatterns = [
@@ -51,7 +52,9 @@ urlpatterns = [
     path('interview/feedback/generate/', views.generate_feedback_report, name='generate_feedback'),
     path('followup/check/', views.decide_followup_question, name='followup_check'),
 
-    path('resume/tts/', decide_resume_question, name='resume_check'),
+    # history 조회
+    path('feedback/history/', get_feedback_history, name='feedback_history'),
+    path("get-signed-url", get_signed_pdf_url),
 
     path("", health_check),
     # history 조회

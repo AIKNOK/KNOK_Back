@@ -29,8 +29,7 @@ SECRET_KEY = 'django-insecure-acglm2hmr87(e-83fxvlq(reeayyih&s50qp1!3ilbj6!3(ymu
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = False
 
-ALLOWED_HOSTS = ["api.ai-knok.com", "localhost"]
-
+ALLOWED_HOSTS = ["*"]
 
 # Application definition
 
@@ -62,6 +61,7 @@ MIDDLEWARE = [
 CORS_ALLOWED_ORIGINS = [
     "https://ai-knok.com",
     "https://www.ai-knok.com",
+    "http://localhost:5173",
 ]
 
 ROOT_URLCONF = 'config.urls'
@@ -175,6 +175,7 @@ SIMPLE_JWT = {
     "VERIFY_AUDIENCE": False,  # 👈 이 줄이 핵심입니다
 }
 
-SECURE_SSL_REDIRECT = True
-SESSION_COOKIE_SECURE = True
-CSRF_COOKIE_SECURE = True
+# History 페이지에서 사용할 CloudFront 키
+CLOUDFRONT_KEY_PAIR_ID = config("CLOUDFRONT_KEY_PAIR_ID")
+CLOUDFRONT_DOMAIN = config("CLOUDFRONT_DOMAIN")
+CLOUDFRONT_PRIVATE_KEY_PATH = config("CLOUDFRONT_PRIVATE_KEY_PATH")

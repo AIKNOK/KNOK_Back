@@ -8,6 +8,7 @@ from pydub import AudioSegment
 from myapp.utils.keyword_extractor import extract_resume_keywords
 from myapp.utils.followup_logic import should_generate_followup
 from boto3.dynamodb.conditions import Key
+from urllib.parse import unquote
 
 import requests
 import re
@@ -41,6 +42,7 @@ from reportlab.lib.pagesizes import A4
 from botocore.exceptions import ClientError
 from datetime import datetime
 from django.core.cache import cache
+from .services.feedback_service import get_signed_pdf_url_by_video_id
 
 # 🔐 SECRET_HASH 계산 함수 (Cognito)
 def get_secret_hash(username):
@@ -408,7 +410,7 @@ AI가 생성한 질문:
     }
     try:
         tts_response = requests.post(
-            "http://13.209.16.252:8002/api/generate-resume-question/",
+            "http://knok-tts-test-alb-1052508342.ap-northeast-2.elb.amazonaws.com/api/generate-resume-question/",
             headers=headers,
             timeout=60
         )
@@ -808,27 +810,18 @@ def generate_feedback_report(request):
     
     # 플레인 텍스트를 파싱해서 구조화된 dict로 변환
     feedback = parse_plain_feedback(raw_text)
+    # feedback = parse_claude_feedback_and_score(raw_text)
     score = calculate_score(feedback["chart"])
     emoji = "🙂" if score >= 80 else "😐" if score >= 60 else "😟"
 
-    # ✅ 캐시에 저장 (video_id 기준)
-    video_id = analysis.get("upload_id", "unknown_video_id")
-    cache_key = f"feedback_cache:{video_id}"
+    # ✅ 캐시에 저장 (email 기준)
+    cache_key = f"feedback_cache:{user.email}"
     cache.set(cache_key, {
         "user_email": user.email,
         "score": score,
         "emoji": emoji,
     }, timeout=300) 
 
-    # DynamoDB에 저장
-    save_feedback_to_dynamodb(
-        user_email=user.email,
-        video_id=video_id,
-        emoji="🙂",  # 또는 chart 점수 기준으로 이모지 결정
-        total_score=score,
-        pdf_url="업로드 이후 저장된 PDF URL"
-    )
-    
     return Response(feedback)
 
     
@@ -938,7 +931,7 @@ def decide_followup_question(request):
         return Response({'error': 'S3 저장 실패', 'detail': str(e)}, status=500)
 
     # TTS 서버 호출
-    tts_url = "http://13.209.16.252:8002/api/generate-followup-question/tts/"
+    tts_url = "http://knok-tts-test-alb-1052508342.ap-northeast-2.elb.amazonaws.com/api/generate-followup-question/tts/"
     try:
         tts_response = requests.post(tts_url, json={
             "question_number": followup_question_number,
@@ -1418,9 +1411,8 @@ def upload_feedback_pdf(request):
                       ExtraArgs={"ContentType": "application/pdf"})
 
     url = f"https://{settings.AWS_CLIP_VIDEO_BUCKET_NAME}.s3.{settings.AWS_S3_REGION_NAME}.amazonaws.com/{pdf_key}"
-
     # ✅ 캐시에서 점수/이모지 불러오기
-    cache_key = f"feedback_cache:{video_id}"
+    cache_key = f"feedback_cache:{request.user.email}"
     cached = cache.get(cache_key)
     if not cached:
         return Response({"error": "피드백 분석 정보가 만료되었거나 없습니다."}, status=400)
@@ -1434,8 +1426,7 @@ def upload_feedback_pdf(request):
     )
     return Response({"pdf_url": url})
 
-
-# feedback 관련 내용 DB에 업로드
+# feedback 관련 내용 DB에 업로드Add commentMore actions
 def save_feedback_to_dynamodb(user_email, video_id, emoji, total_score, pdf_url):
     dynamodb = boto3.client('dynamodb', region_name='ap-northeast-2')
     dynamodb.put_item(
@@ -1479,6 +1470,26 @@ def get_feedback_history(request):
     items = response.get("Items", [])
 
     return Response(items)
+
+# History에서 PDF 다운을 위한 Signed URL
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def get_signed_pdf_url(request):
+    print("🔍 request.user:", request.user)
+    print("🔍 request.auth:", request.auth)
+    print("🔍 Authorization header:", request.headers.get('Authorization'))
+    user_email = request.user.email
+    video_id_encoded = request.GET.get("video_id", "")
+    video_id = unquote(video_id_encoded).strip()
+
+    if not video_id:
+        return Response({"error": "video_id는 필수입니다."}, status=400)
+
+    url = get_signed_pdf_url_by_video_id(user_email, video_id)
+    if not url:
+        return Response({"error": "해당 PDF를 찾을 수 없습니다."}, status=404)
+
+    return Response({"signed_url": url})
 
 
 SLACK_WEBHOOK_URL = "https://hooks.slack.com/services/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"
@@ -1613,44 +1624,6 @@ def get_ordered_question_audio(request):
     results = list(filter(None, parsed))
     results = sorted(results, key=lambda x: x["order"])
     return Response(results)
-
-
-@api_view(['POST'])
-@permission_classes([IsAuthenticated])
-def decide_resume_question(request):
-    auth_header = request.headers.get('Authorization', '')
-    if not auth_header.startswith('Bearer '):
-        return Response({'error': 'Authorization 헤더가 없습니다.'}, status=401)
-    
-    token = auth_header.replace('Bearer ', '', 1).strip()
-    headers = {
-        "Authorization": f"Bearer {token}"
-    }
-
-    tts_url = "http://13.209.16.252:8002/api/generate-resume-question/"
-    try:
-        # 외부 POST 요청 (body 없음)
-        tts_response = requests.post(tts_url, headers=headers)
-
-        # 응답 상태 코드 확인
-        if tts_response.status_code != 200:
-            return Response({
-                "error": "Resume TTS 생성 실패",
-                "detail": tts_response.json()
-            }, status=tts_response.status_code)
-
-        # 성공 응답 반환
-        return Response({
-            "message": "Resume TTS 호출 성공",
-            "result": tts_response.json()
-        }, status=200)
-
-    except requests.exceptions.RequestException as e:
-        return Response({
-            "error": "Resume TTS 호출 중 예외 발생",
-            "detail": str(e)
-        }, status=500)
-
 
 def health_check(request):
     return JsonResponse({"status": "ok"})

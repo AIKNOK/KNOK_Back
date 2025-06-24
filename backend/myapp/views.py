@@ -1450,31 +1450,44 @@ def save_feedback_to_dynamodb(user_email, video_id, emoji, total_score, pdf_url)
 
 # History 조회 API
 @api_view(['GET'])
-@permission_classes([IsAuthenticated])
+# @permission_classes([IsAuthenticated])
 def get_feedback_history(request):
-    user_email = request.user.email
-    sort_by = request.GET.get("sort", "created_at")  
-    order = request.GET.get("order", "desc")
-    asc = True if order == "asc" else False
+    print("🔍 request.user:", request.user)
+    print("🔍 request.auth:", request.auth)
+    print("🔍 Authorization header:", request.headers.get('Authorization'))
 
-    dynamodb = boto3.resource('dynamodb', region_name='ap-northeast-2')
-    table = dynamodb.Table('feedback_reports')
+    if not request.user or not request.user.is_authenticated:
+        print("❌ 인증되지 않은 사용자 접근")
+        return Response({"error": "인증되지 않은 사용자입니다."}, status=401)
 
-    if sort_by == "score":
-        index_name = "GSI_user_email_score"
-    else:
-        index_name = "GSI_user_email_created_at"
+    try:
+        user_email = request.user.email
+        print("✅ 사용자 이메일:", user_email)
 
-    key_condition = Key("user_email").eq(user_email)
-    response = table.query(
-        IndexName=index_name,
-        KeyConditionExpression=key_condition,
-        ScanIndexForward=asc
-    )
+        sort_by = request.GET.get("sort", "created_at")  
+        order = request.GET.get("order", "desc")
+        asc = True if order == "asc" else False
 
-    items = response.get("Items", [])
+        dynamodb = boto3.resource('dynamodb', region_name='ap-northeast-2')
+        table = dynamodb.Table('feedback_reports')
 
-    return Response(items)
+        index_name = "GSI_user_email_score" if sort_by == "score" else "GSI_user_email_created_at"
+
+        key_condition = Key("user_email").eq(user_email)
+        response = table.query(
+            IndexName=index_name,
+            KeyConditionExpression=key_condition,
+            ScanIndexForward=asc
+        )
+
+        items = response.get("Items", [])
+        print(f"📦 불러온 항목 수: {len(items)}")
+
+        return Response(items)
+
+    except Exception as e:
+        print("❌ 히스토리 조회 중 오류 발생:", str(e))
+        return Response({"error": "히스토리 조회 실패", "detail": str(e)}, status=500)
 
 # History에서 PDF 다운을 위한 Signed URL
 @api_view(["GET"])

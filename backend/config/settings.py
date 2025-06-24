@@ -15,6 +15,8 @@ from decouple import config
 from datetime import timedelta
 from corsheaders.defaults import default_headers
 
+import logging
+logging.basicConfig(level=logging.DEBUG)
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -29,7 +31,7 @@ SECRET_KEY = 'django-insecure-acglm2hmr87(e-83fxvlq(reeayyih&s50qp1!3ilbj6!3(ymu
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = False
 
-ALLOWED_HOSTS = ["api.ai-knok.com", "localhost"]
+ALLOWED_HOSTS = ["api.ai-knok.com", "localhost", "127.0.0.1"]
 
 
 # Application definition
@@ -179,4 +181,4 @@ SIMPLE_JWT = {
 # History 페이지에서 사용할 CloudFront 키
 CLOUDFRONT_KEY_PAIR_ID = config("CLOUDFRONT_KEY_PAIR_ID")
 CLOUDFRONT_DOMAIN = config("CLOUDFRONT_DOMAIN")
-CLOUDFRONT_PRIVATE_KEY_PATH = config("CLOUDFRONT_PRIVATE_KEY_PATH")
+CLOUDFRONT_SECRET_NAME=config("CLOUDFRONT_SECRET_NAME")

@@ -40,7 +40,7 @@ def rsa_signer(message):
 
 signer = CloudFrontSigner(KEY_PAIR_ID, rsa_signer)
 
-def generate_signed_url(file_path: str, expire_hours: int = 1):
+def generate_signed_url(file_path: str, expire_hours: int = 24 * 30):
     try:
         if file_path.startswith("/clips/"):
             file_path = file_path[len("/clips"):] 

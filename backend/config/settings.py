@@ -176,6 +176,7 @@ SIMPLE_JWT = {
     "VERIFY_AUDIENCE": False,  # 👈 이 줄이 핵심입니다
 }
 
+
 # History 페이지에서 사용할 CloudFront 키
 CLOUDFRONT_KEY_PAIR_ID = config("CLOUDFRONT_KEY_PAIR_ID")
 CLOUDFRONT_DOMAIN = config("CLOUDFRONT_DOMAIN")

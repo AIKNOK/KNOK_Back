@@ -116,9 +116,11 @@ async def transcribe_ws(websocket: WebSocket, email: str = Query(...), question_
             "upload_id": upload_id
         }))
         
-        await send_audio()
-        await stream.input_stream.end_stream()
-        await handle_transcription()
+        await asyncio.gather(
+            send_audio(),           # 👂 오디오 계속 받으면서
+            handle_transcription()  # ✍️ 동시에 Transcribe 결과도 계속 수신
+        )
+        await stream.input_stream.end_stream()  # 수신 후 명시적으로 종료
     except Exception as e:
         print("🔥 전사 실패:", e)
     finally:

@@ -26,7 +26,7 @@ urlpatterns = [
     path('resume/', views.get_resume_view, name='resume_get'),
     path('generate-resume-questions/', views.generate_resume_questions, name='generate_resume_questions'),
     path('get-resume-text/', views.get_resume_text, name='get_resume_text'),
-    path('get_all_questions', views.get_all_questions_view, name='get_all_questions'),
+    path('get_all_questions/', views.get_all_questions_view, name='get_all_questions'),
 
     # 🎤 면접 관련
     path('posture/', views.receive_posture_count, name='posture'),

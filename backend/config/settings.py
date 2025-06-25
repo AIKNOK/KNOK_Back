@@ -65,7 +65,9 @@ CORS_ALLOW_ALL_ORIGINS = True
 CORS_ALLOWED_ORIGINS = [
     "https://ai-knok.com",
     "https://www.ai-knok.com",           
-    "https://api.ai-knok.com",  
+    "https://api.ai-knok.com",
+    "http://yuna-front-test.s3-website.ap-northeast-2.amazonaws.com",
+    "http://knok-test-front.s3-website.ap-northeast-2.amazonaws.com",
 ]
 
 CORS_ALLOW_CREDENTIALS = True

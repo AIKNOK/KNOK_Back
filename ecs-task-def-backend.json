@@ -39,7 +39,7 @@
         { "name": "CLOUDFRONT_KEY_PAIR_ID", "value": "K4N22H8XT57MX"},
         { "name": "CLOUDFRONT_DOMAIN", "value": "https://d2luzuyw40u3n7.cloudfront.net"},
         { "name": "CLOUDFRONT_SECRET_NAME", "value": "knok/cloudfront/private-key"},
-      ],
+      ]
 
       "logConfiguration": {
         "logDriver": "awslogs",

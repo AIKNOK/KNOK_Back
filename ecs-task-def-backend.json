@@ -35,7 +35,10 @@
         { "name": "COGNITO_USER_POOL_ID", "value": "ap-northeast-2_kJUsqNcRW" },
         { "name": "COGNITO_APP_CLIENT_ID", "value": "126j419a8sf0pot0obuvduh25a" },
         { "name": "COGNITO_APP_CLIENT_SECRET", "value": "${COGNITO_APP_CLIENT_SECRET}" },
-        { "name": "DJANGO_SETTINGS_MODULE", "value": "config.settings" }
+        { "name": "DJANGO_SETTINGS_MODULE", "value": "config.settings" },
+        { "name": "CLOUDFRONT_KEY_PAIR_ID", "value": "K4N22H8XT57MX"},
+        { "name": "CLOUDFRONT_DOMAIN", "value": "https://d2luzuyw40u3n7.cloudfront.net"},
+        { "name": "CLOUDFRONT_SECRET_NAME", "value": "knok/cloudfront/private-key"},
       ],
 
       "logConfiguration": {

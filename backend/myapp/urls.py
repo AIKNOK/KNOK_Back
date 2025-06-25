@@ -54,7 +54,7 @@ urlpatterns = [
 
     # history 조회
     path('feedback/history/', get_feedback_history, name='feedback_history'),
-    path("get-signed-url", get_signed_pdf_url),
+    path("get-signed-url/", get_signed_pdf_url),
 
     path("health/", health_check),
 

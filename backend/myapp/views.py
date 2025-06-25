@@ -7,8 +7,9 @@ from rest_framework import status
 from pydub import AudioSegment
 from myapp.utils.keyword_extractor import extract_resume_keywords
 from myapp.utils.followup_logic import should_generate_followup
+from boto3.dynamodb.conditions import Key
+from urllib.parse import unquote
 from myapp.authentication import CognitoJWTAuthentication
-
 
 import requests
 import re
@@ -27,6 +28,7 @@ import moviepy.editor as mp
 import subprocess
 import os
 import traceback
+import uuid
 
 from django.conf import settings
 from .models import Resume
@@ -39,6 +41,9 @@ from datetime import timedelta
 from reportlab.pdfgen import canvas  # or your preferred PDF lib
 from reportlab.lib.pagesizes import A4
 from botocore.exceptions import ClientError
+from datetime import datetime
+from django.core.cache import cache
+from .services.feedback_service import get_signed_pdf_url_by_video_id
 from django.views.decorators.http import require_GET
 from django.views.decorators.http import require_http_methods
 
@@ -432,9 +437,9 @@ AI가 생성한 질문:
     }
     try:
         tts_response = requests.post(
-            "http://13.209.16.252:8002/api/generate-resume-question/",
+            "http://knok-tts-test-alb-1052508342.ap-northeast-2.elb.amazonaws.com/api/generate-resume-question/",
             headers=headers,
-            timeout=30
+            timeout=60
         )
         if tts_response.status_code != 200:
             print("❌ TTS 생성 실패:", tts_response.text)
@@ -674,7 +679,7 @@ def analyze_voice_api(request):
     if not upload_id:
         return JsonResponse({'error': 'upload_id 필수'}, status=400)
     
-    bucket = 'live-stt'
+    bucket = settings.AWS_AUDIO_BUCKET_NAME
     email_prefix = request.user.email.split('@')[0]
     
     prefix = f"{email_prefix}/{upload_id}/wavs/"   # 여러 답변 오디오가 여기에 저장되어 있음
@@ -771,19 +776,19 @@ def generate_feedback_report(request):
 [면접자 평가에 대한 전체적인 요약 1-2문장]
 
 === 일관성 ===
-- [답변 전체에 흐름이 있고 앞뒤가 자연스럽게 연결되는지에 대한 피드백]
+- [전체 답변 결과({transcribe_desc})를 바탕으로 답변 전체에 흐름이 있고 앞뒤가 자연스럽게 연결되는지에 대한 피드백]
 (점수: 0~5점 중 하나)
 
 === 논리성 ===
-- [주장에 대해 명확한 이유와 근거가 있으며 논리적 흐름이 있는지에 대한 피드백]
+- [전체 답변 결과({transcribe_desc})를 바탕으로 주장에 대해 명확한 이유와 근거가 있으며 논리적 흐름이 있는지에 대한 피드백]
 (점수: 0~5점 중 하나)
 
 === 대처능력 ===
-- [예상치 못한 질문에도 당황하지 않고 유연하게 답했는지에 대한 피드백]
+- [전체 답변 결과({transcribe_desc})를 바탕으로 예상치 못한 질문에도 당황하지 않고 유연하게 답했는지에 대한 피드백]
 (점수: 0~5점 중 하나)
 
 === 구체성 ===
-- [추상적인 설명보다 구체적인 경험과 예시가 포함되어 있는지에 대한 피드백]
+- [전체 답변 결과({transcribe_desc})를 바탕으로 추상적인 설명보다 구체적인 경험과 예시가 포함되어 있는지에 대한 피드백]
 (점수: 0~5점 중 하나)
 
 === 말하기방식 ===
@@ -833,6 +838,17 @@ def generate_feedback_report(request):
     # 플레인 텍스트를 파싱해서 구조화된 dict로 변환
     feedback = parse_plain_feedback(raw_text)
     # feedback = parse_claude_feedback_and_score(raw_text)
+    score = calculate_score(feedback["chart"])
+    emoji = "🙂" if score >= 80 else "😐" if score >= 60 else "😟"
+
+    # ✅ 캐시에 저장 (email 기준)
+    cache_key = f"feedback_cache:{user.email}"
+    cache.set(cache_key, {
+        "user_email": user.email,
+        "score": score,
+        "emoji": emoji,
+    }, timeout=300) 
+
     return Response(feedback)
 
     
@@ -1080,163 +1096,25 @@ def get_resume_text(request):
     except Exception as e:
         return Response({'error': str(e)}, status=500)
 
-class FullVideoUploadView(APIView):
-    permission_classes = [IsAuthenticated]
-
-    def post(self, request):
-        uploaded_video = request.FILES.get("video")
-        video_id = request.data.get("videoId")
-
-        if not uploaded_video or not video_id:
-            return Response({"error": "필수 값 누락"}, status=400)
-
-        email_prefix = request.user.email.split('@')[0]
-        key = f"videos/{email_prefix}/{video_id}.webm"
-
-        s3 = boto3.client(
-            's3',
-            aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
-            aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
-            region_name=settings.AWS_S3_REGION_NAME
-        )
-
-        try:
-            s3.upload_fileobj(
-                uploaded_video,
-                settings.AWS_FULL_VIDEO_BUCKET_NAME,
-                key,
-                ExtraArgs={"ContentType": "video/webm"}
-            )
-            return Response({
-                "message": "전체 영상 업로드 완료",
-                "video_path": key
-            })
-        except Exception as e:
-            return Response({"error": str(e)}, status=500)
-
-@api_view(['POST'])
-@permission_classes([IsAuthenticated])
-def extract_bad_posture_clips(request):
-    try:
-        print("[🔍 segments 수신 내용]", request.data.get("segments"))
-        video_id = request.data.get("videoId")
-        segments = request.data.get("segments")
-        feedbacks = request.data.get("feedbacks")
-
-        if not video_id or not segments or not feedbacks:
-            return Response({"error": "videoId, segments, feedbacks 필수"}, status=400)
-
-        email_prefix = request.user.email.split('@')[0]
-        video_key = f"videos/{email_prefix}/{video_id}.webm"
-
-        # S3에서 전체 영상 다운로드
-        s3 = boto3.client(
-            "s3",
-            aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
-            aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
-            region_name=settings.AWS_S3_REGION_NAME
-        )
-
-        full_video_temp = tempfile.NamedTemporaryFile(delete=False, suffix=".webm")
-        s3.download_fileobj(settings.AWS_FULL_VIDEO_BUCKET_NAME, video_key, full_video_temp)
-        full_video_temp.close()
-
-        # webm → mp4 변환
-        converted_video_path = convert_webm_to_mp4(full_video_temp.name)
-        video = mp.VideoFileClip(converted_video_path)
-        duration = video.duration
-
-        results = []
-
-        for idx, segment in enumerate(segments):
-            try:
-                start = max(0.0, float(segment["start"]))
-                end   = min(duration, float(segment["end"]))
-            except Exception as e:
-                return Response({"error": f"start/end 변환 실패: {str(e)}"}, status=400)
-
-            if end <= start:
-                continue
-
-            # 클립 추출
-            clip = video.subclip(start, end)
-            clip_path = tempfile.NamedTemporaryFile(delete=False, suffix=f"_clip_{idx+1}.mp4").name
-            clip.write_videofile(clip_path, codec="libx264", audio_codec="aac", logger=None)
-
-            # 클립 업로드
-            clip_s3_key = f"clips/{email_prefix}/{video_id}_clip_{idx+1}.mp4"
-            s3.upload_file(
-                clip_path,
-                settings.AWS_CLIP_VIDEO_BUCKET_NAME,
-                clip_s3_key,
-                ExtraArgs={"ContentType": "video/mp4"}
-            )
-
-            # 썸네일 생성 및 업로드
-            thumbnail_path = tempfile.NamedTemporaryFile(delete=False, suffix=".jpg").name
-            clip.save_frame(thumbnail_path, t=(end - start) / 2)
-            thumbnail_s3_key = f"thumbnails/{email_prefix}/{video_id}_thumb_{idx+1}.jpg"
-            s3.upload_file(
-                thumbnail_path,
-                settings.AWS_CLIP_VIDEO_BUCKET_NAME,
-                thumbnail_s3_key,
-                ExtraArgs={"ContentType": "image/jpeg"}
-            )
-
-            # presigned URL 생성
-            clip_url = s3.generate_presigned_url(
-                'get_object',
-                Params={'Bucket': settings.AWS_CLIP_VIDEO_BUCKET_NAME, 'Key': clip_s3_key},
-                ExpiresIn=60 * 60
-            )
-            thumbnail_url = s3.generate_presigned_url(
-                'get_object',
-                Params={'Bucket': settings.AWS_CLIP_VIDEO_BUCKET_NAME, 'Key': thumbnail_s3_key},
-                ExpiresIn=60 * 60
-            )
-
-            results.append({
-                "clipUrl": clip_url,
-                "thumbnailUrl": thumbnail_url,
-                "feedback": feedbacks[idx] if idx < len(feedbacks) else ""
-            })
-
-        return Response({
-            "message": "클립 저장 완료",
-            "clips": results,
-        })
-
-    except Exception as e:
-        print("🔥 클립 추출 예외:", traceback.format_exc())
-        return Response({"error": str(e)}, status=500)
-
 def convert_webm_to_mp4(input_path):
     output_path = tempfile.NamedTemporaryFile(delete=False, suffix=".mp4").name
+
     command = [
         "ffmpeg",
         "-y",
+        "-fflags", "+genpts",               
         "-i", input_path,
+        "-vf", "fps=30",                    
         "-c:v", "libx264",
         "-preset", "fast",
         "-crf", "23",
         "-c:a", "aac",
+        "-movflags", "+faststart",          
+        "-copyts",                          
+        "-avoid_negative_ts", "make_zero",  
         output_path
     ]
-    subprocess.run(command, check=True)
-    return output_path
 
-def convert_webm_to_mp4(input_path):
-    output_path = tempfile.NamedTemporaryFile(delete=False, suffix=".mp4").name
-    command = [
-        "ffmpeg",
-        "-y",
-        "-i", input_path,
-        "-c:v", "libx264",
-        "-preset", "fast",
-        "-crf", "23",
-        "-c:a", "aac",
-        output_path
-    ]
     subprocess.run(command, check=True)
     return output_path
 
@@ -1288,6 +1166,11 @@ def get_all_questions_view(request):
     followup_questions = fetch_questions('knok-followup-questions')
 
     merged = {**base_questions, **followup_questions}
+
+    def safe_key(k):
+        parts = k.split('-')
+        return [(0, int(p)) if p.isdigit() else (1, p) for p in parts]
+    
 
     def safe_key(k):
         parts = k.split('-')
@@ -1414,8 +1297,8 @@ def download_feedback_zip(request):
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def upload_feedback_pdf(request):
-    file = request.FILES.get("file")
-    video_id = request.POST.get("videoId")
+    file = request.FILES.get("pdf")
+    video_id = request.POST.get("video_id")
     if not file or not video_id:
         return Response({"error": "file, videoId 필수"}, status=400)
 
@@ -1430,7 +1313,99 @@ def upload_feedback_pdf(request):
                       ExtraArgs={"ContentType": "application/pdf"})
 
     url = f"https://{settings.AWS_CLIP_VIDEO_BUCKET_NAME}.s3.{settings.AWS_S3_REGION_NAME}.amazonaws.com/{pdf_key}"
+    # ✅ 캐시에서 점수/이모지 불러오기
+    cache_key = f"feedback_cache:{request.user.email}"
+    cached = cache.get(cache_key)
+    if not cached:
+        return Response({"error": "피드백 분석 정보가 만료되었거나 없습니다."}, status=400)
+
+    save_feedback_to_dynamodb(
+        user_email=cached["user_email"],
+        video_id=video_id,
+        total_score=cached["score"],
+        emoji=cached["emoji"],
+        pdf_url=url,
+    )
     return Response({"pdf_url": url})
+
+# feedback 관련 내용 DB에 업로드Add commentMore actions
+def save_feedback_to_dynamodb(user_email, video_id, emoji, total_score, pdf_url):
+    dynamodb = boto3.client('dynamodb', region_name='ap-northeast-2')
+    dynamodb.put_item(
+        TableName='feedback_reports',
+        Item={
+            'id': {'S': str(uuid.uuid4())},
+            'user_email': {'S': user_email},
+            'video_id': {'S': video_id},
+            'created_at': {'S': datetime.utcnow().isoformat()},
+            'total_score': {'N': str(total_score)},
+            'interviewer_emoji': {'S': emoji},
+            'pdf_url': {'S': pdf_url}
+        }
+    )
+
+
+# History 조회 API
+@api_view(['GET'])
+# @permission_classes([IsAuthenticated])
+def get_feedback_history(request):
+    print("🔍 request.user:", request.user)
+    print("🔍 request.auth:", request.auth)
+    print("🔍 Authorization header:", request.headers.get('Authorization'))
+
+    if not request.user or not request.user.is_authenticated:
+        print("❌ 인증되지 않은 사용자 접근")
+        return Response({"error": "인증되지 않은 사용자입니다."}, status=401)
+
+    try:
+        user_email = request.user.email
+        print("✅ 사용자 이메일:", user_email)
+
+        sort_by = request.GET.get("sort", "created_at")  
+        order = request.GET.get("order", "desc")
+        asc = True if order == "asc" else False
+
+        dynamodb = boto3.resource('dynamodb', region_name='ap-northeast-2')
+        table = dynamodb.Table('feedback_reports')
+
+        index_name = "GSI_user_email_score" if sort_by == "score" else "GSI_user_email_created_at"
+
+        key_condition = Key("user_email").eq(user_email)
+        response = table.query(
+            IndexName=index_name,
+            KeyConditionExpression=key_condition,
+            ScanIndexForward=asc
+        )
+
+        items = response.get("Items", [])
+        print(f"📦 불러온 항목 수: {len(items)}")
+
+        return Response(items)
+
+    except Exception as e:
+        print("❌ 히스토리 조회 중 오류 발생:", str(e))
+        return Response({"error": "히스토리 조회 실패", "detail": str(e)}, status=500)
+
+# History에서 PDF 다운을 위한 Signed URL
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def get_signed_pdf_url(request):
+    print("🔍 request.user:", request.user)
+    print("🔍 request.auth:", request.auth)
+    print("🔍 Authorization header:", request.headers.get('Authorization'))
+    user_email = request.user.email
+    video_id_encoded = request.GET.get("video_id", "")
+    video_id = unquote(video_id_encoded).strip()
+
+    if not video_id:
+        return Response({"error": "video_id는 필수입니다."}, status=400)
+
+    url = get_signed_pdf_url_by_video_id(user_email, video_id)
+    if not url:
+        return Response({"error": "해당 PDF를 찾을 수 없습니다."}, status=404)
+
+    return Response({"signed_url": url})
+
 
 SLACK_WEBHOOK_URL = "https://hooks.slack.com/services/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"
 
@@ -1471,48 +1446,6 @@ def send_to_slack(request):
 
     return JsonResponse({"error": "POST 요청만 지원됩니다."}, status=400)
 
-@api_view(['POST'])
-@permission_classes([IsAuthenticated])
-def end_interview_session(request):
-    interview_id= request.data.get('interview_id')
-    if not interview_id:
-        return Response({'error': 'interview_id는 필수입니다.'}, status=400)
-
-    email_prefix = request.user.email.split('@')[0]
-
-    # 삭제할 버킷들
-    targets = [
-        (settings.AWS_FOLLOWUP_QUESTION_BUCKET_NAME, f"{email_prefix}/{interview_id}/"),
-        (settings.AWS_AUDIO_BUCKET_NAME, f"{email_prefix}/{interview_id}/"),
-        (settings.AWS_CLIP_VIDEO_BUCKET_NAME, f"clips/{email_prefix}/{interview_id}_"),
-        (settings.AWS_FULL_VIDEO_BUCKET_NAME, f"videos/{email_prefix}/{interview_id}.webm"),
-        # 추가적으로 필요한 경로들
-    ]
-
-    s3 = boto3.client('s3',
-                      aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
-                      aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
-                      region_name=settings.AWS_S3_REGION_NAME)
-
-    deleted_files = []
-
-    for bucket, prefix in targets:
-        if prefix.endswith('.webm'):  # 단일 파일
-            try:
-                s3.delete_object(Bucket=bucket, Key=prefix)
-                deleted_files.append(prefix)
-            except Exception as e:
-                print(f"❌ 단일 파일 삭제 실패: {prefix} → {e}")
-        else:
-            response = s3.list_objects_v2(Bucket=bucket, Prefix=prefix)
-            for obj in response.get('Contents', []):
-                s3.delete_object(Bucket=bucket, Key=obj['Key'])
-                deleted_files.append(obj['Key'])
-
-    return Response({
-        'message': '면접 세션 종료 및 데이터 정리 완료',
-        'deleted': deleted_files
-    })
 # TTS 음성파일 가져오기
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
@@ -1578,7 +1511,7 @@ def decide_resume_question(request):
         "Authorization": f"Bearer {token}"
     }
 
-    tts_url = "http://13.209.16.252:8002/api/generate-resume-question/"
+    tts_url = "http://43.203.222.186:8002/api/generate-followup-question/tts/"
     try:
         # 외부 POST 요청 (body 없음)
         tts_response = requests.post(tts_url, headers=headers)
@@ -1605,4 +1538,128 @@ def decide_resume_question(request):
 @csrf_exempt
 @require_http_methods(["GET", "HEAD"])
 def health_check(request):
+    return JsonResponse({"status": "ok"})
+  
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def upload_question_clip(request):
+    video = request.FILES.get("video")
+    question_id = request.data.get("question_id")
+    interview_id = request.data.get("interview_id")
+
+    if not video or not question_id or not interview_id:
+        return Response({"error": "필수 값 누락"}, status=400)
+
+    email_prefix = request.user.email.split('@')[0]
+    s3_key = f"full_clips/{email_prefix}/{interview_id}/q{question_id}.webm"
+
+    s3 = boto3.client(
+        "s3",
+        aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
+        aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
+        region_name=settings.AWS_S3_REGION_NAME)
+
+    try:
+        s3.upload_fileobj(video, settings.AWS_CLIP_VIDEO_BUCKET_NAME, s3_key,
+                          ExtraArgs={"ContentType": "video/webm"})
+        return Response({
+            "message": "질문 영상 업로드 완료",
+            "video_path": s3_key
+        })
+    except Exception as e:
+        return Response({"error": str(e)}, status=500)
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def extract_question_clip_segments(request):
+    interview_id = request.data.get("interview_id")
+    question_id = request.data.get("question_id")
+    segments = request.data.get("segments")
+    feedbacks = request.data.get("feedbacks", [])
+
+    if not interview_id or not question_id or not segments:
+        return Response({"error": "interview_id, question_id, segments 필수"}, status=400)
+
+    email_prefix = request.user.email.split('@')[0]
+    s3_key = f"full_clips/{email_prefix}/{interview_id}/q{question_id}.webm"
+
+    s3 = boto3.client("s3",
+        aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
+        aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
+        region_name=settings.AWS_S3_REGION_NAME)
+
+    # 1. 전체 webm 파일 다운로드
+    temp_webm = tempfile.NamedTemporaryFile(delete=False, suffix=".webm")
+    s3.download_fileobj(settings.AWS_CLIP_VIDEO_BUCKET_NAME, s3_key, temp_webm)
+    temp_webm.close()
+
+    # 2. 전체 webm → mp4 변환
+    mp4_path = convert_webm_to_mp4(temp_webm.name)
+    print(f"[🎬 변환 완료] {mp4_path}")
+
+    try:
+        video = mp.VideoFileClip(mp4_path)
+        print(f"[DEBUG] video.duration={video.duration}, received segments={segments}")
+
+    except Exception as e:
+        print("❌ VideoFileClip 로딩 실패:", e)
+        return Response({"error": "video 로딩 실패"}, status=500)
+
+    results = []
+    for idx, seg in enumerate(segments):
+        try:
+            abs_start = float(seg["start"])
+            abs_end = float(seg["end"])
+
+            start = abs_start
+            end   = abs_end
+
+            if end <= start:
+                print(f"❌ 잘못된 segment 범위: {abs_start} ~ {abs_end} → {start} ~ {end}")
+                continue
+
+            print(f"[🎞️ 클립 분할] 상대 시간: {start} ~ {end}")
+            clip = video.subclip(start, end)
+
+            # 3. 클립 파일 저장
+            clip_path = tempfile.NamedTemporaryFile(delete=False, suffix=".mp4").name
+            clip.write_videofile(clip_path, codec="libx264", audio_codec="aac", verbose=False, logger=None)
+            clip.close()
+            del clip  # 리소스 해제
+
+            clip_key = f"clips/{email_prefix}/{interview_id}_q{question_id}_seg{idx+1}.mp4"
+            s3.upload_file(clip_path, settings.AWS_CLIP_VIDEO_BUCKET_NAME, clip_key, ExtraArgs={"ContentType": "video/mp4"})
+            print(f"[📤 클립 업로드 완료] {clip_key}")
+
+            # 4. 썸네일 생성
+            thumb_path = tempfile.NamedTemporaryFile(delete=False, suffix=".jpg").name
+            clip_for_thumb = video.subclip(start, end)
+            clip_for_thumb.save_frame(thumb_path, t=(start + end) / 2)
+            del clip_for_thumb
+
+            thumb_key = f"thumbnails/{email_prefix}/{interview_id}_q{question_id}_thumb{idx+1}.jpg"
+            s3.upload_file(thumb_path, settings.AWS_CLIP_VIDEO_BUCKET_NAME, thumb_key, ExtraArgs={"ContentType": "image/jpeg"})
+            print(f"[🖼️ 썸네일 업로드 완료] {thumb_key}")
+
+            # 5. presigned URL 반환
+            clip_url = s3.generate_presigned_url('get_object',
+                            Params={'Bucket': settings.AWS_CLIP_VIDEO_BUCKET_NAME, 'Key': clip_key},
+                            ExpiresIn=3600)
+            thumb_url = s3.generate_presigned_url('get_object',
+                            Params={'Bucket': settings.AWS_CLIP_VIDEO_BUCKET_NAME, 'Key': thumb_key},
+                            ExpiresIn=3600)
+
+            results.append({
+                "clip_url": clip_url,
+                "thumbnail_url": thumb_url,
+                "feedback": feedbacks[idx] if idx < len(feedbacks) else ""
+            })
+        except Exception as e:
+            print(f"❌ segment {idx+1} 처리 실패:", e)
+            continue
+
+    return Response({
+        "message": "클립 segment 처리 완료",
+        "clips": results
+    })
     return JsonResponse({"status": "ok"})

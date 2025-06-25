@@ -3,12 +3,14 @@ from . import views
 from .views import (
     decide_followup_question,
     generate_feedback_report,
-    decide_resume_question,
     get_ordered_question_audio,
     download_feedback_zip,
     upload_feedback_pdf,
+    get_feedback_history,
     send_to_slack,
-    health_check
+    get_feedback_history,
+    health_check,
+    get_signed_pdf_url
 )
 
 urlpatterns = [
@@ -31,8 +33,8 @@ urlpatterns = [
     path('posture/segments', views.receive_posture_count),
     path('analyze-voice/', views.analyze_voice_api, name='analyze_voice'),
     path('audio/upload/', views.AudioUploadView.as_view(), name='upload_audio_and_text'),
-    path('video/upload/', views.FullVideoUploadView.as_view(), name='upload-full-video'),
-    path("video/extract-clips/", views.extract_bad_posture_clips),
+    path('video/upload-question-clip/', views.upload_question_clip),
+    path('video/extract-question-clip-segments/', views.extract_question_clip_segments),
     path("save_transcribed_text/", views.save_transcribed_text, name="save_transcribed_text"),
     path('questions/audio/', views.get_ordered_question_audio, name='get_ordered_question_audio'),
     path('transcript/', views.save_transcribed_text, name='save_transcribed_text'),
@@ -50,11 +52,15 @@ urlpatterns = [
     path('interview/feedback/generate/', views.generate_feedback_report, name='generate_feedback'),
     path('followup/check/', views.decide_followup_question, name='followup_check'),
 
-    path('resume/tts/', decide_resume_question, name='resume_check'),
+    # history 조회
+    path('feedback/history/', get_feedback_history, name='feedback_history'),
+    path("get-signed-url", get_signed_pdf_url),
 
     path("", health_check),
+    # history 조회
+    path('feedback/history/', get_feedback_history, name='feedback_history'),
     path("health/", health_check),
-    
+
     # slack 문의
     path('contact/', send_to_slack, name='send_to_slack'),
 

@@ -15,6 +15,8 @@ from datetime import timedelta
 from corsheaders.defaults import default_headers
 import os
 
+import logging
+logging.basicConfig(level=logging.DEBUG)
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -196,6 +198,11 @@ SIMPLE_JWT = {
     "REFRESH_TOKEN_LIFETIME": timedelta(days=1),
     "VERIFY_AUDIENCE": False,  # 👈 이 줄이 핵심입니다
 }
+
+# History 페이지에서 사용할 CloudFront 키
+CLOUDFRONT_KEY_PAIR_ID = config("CLOUDFRONT_KEY_PAIR_ID")
+CLOUDFRONT_DOMAIN = config("CLOUDFRONT_DOMAIN")
+CLOUDFRONT_SECRET_NAME=config("CLOUDFRONT_SECRET_NAME")
 
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 

@@ -1117,7 +1117,7 @@ def save_transcribed_text(request):
     })
 
 # 이력서를 불러와 텍스트 내용 추출 후 프론트엔드에 반환
-ess_key=s@api_view(['GET'])
+@api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def get_resume_text(request):
     import PyPDF2

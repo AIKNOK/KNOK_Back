@@ -56,7 +56,7 @@ urlpatterns = [
     path('feedback/history/', get_feedback_history, name='feedback_history'),
     path("get-signed-url", get_signed_pdf_url),
 
-    path("", health_check),
+    path("health/", health_check),
 
     # slack 문의
     path('contact/', send_to_slack, name='send_to_slack'),

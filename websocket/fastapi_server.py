@@ -88,14 +88,17 @@ async def transcribe_ws(websocket: WebSocket, email: str = Query(...), question_
             async for event in stream.output_stream:
                 print("Transcribe 이벤트 수신됨")
                 for result in event.transcript.results:
-                    if not result.is_partial:
+                    if not result.is_partial and result.alternatives:
                         text = result.alternatives[0].transcript
-                        transcript_text += text + "\n"
-                        await websocket.send_text(json.dumps({"transcript": text}))
+                        if text.strip():
+                            transcript_text += text + "\n"
+                            await websocket.send_text(json.dumps({"transcript": text}))
         except Exception as e:
             print("❗ 전사 핸들링 예외:", e)
         finally:
             print("Transcribe 결과 수신 종료됨")
+    
+    upload_id = None
 
     try:
         print("asyncio.gather 실행")
@@ -120,11 +123,14 @@ async def transcribe_ws(websocket: WebSocket, email: str = Query(...), question_
              # Claude 3.5로 전사 보정
             refined_transcript = await refine_transcript_with_claude(transcript_text)
 
-            # 오디오 저장
-            save_audio_to_s3(audio_buffer, email, upload_id, question_id)
-
+            if upload_id is not None:
+                # 오디오 저장
+                save_audio_to_s3(audio_buffer, email, upload_id, question_id)
+                save_transcript_to_s3(refined_transcript, email, upload_id, question_id)
+            else:
+                print("⚠️ 후처리 생략: upload_id 없음")
+                
             # ✅ 보정된 텍스트 저장 및 전송
-            save_transcript_to_s3(refined_transcript, email, upload_id, question_id)
             send_transcript_to_django(email, question_id, refined_transcript, token)
         except Exception as e:
             print("❌ 후처리 실패:", e)

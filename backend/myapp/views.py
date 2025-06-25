@@ -1117,7 +1117,7 @@ def save_transcribed_text(request):
     })
 
 # 이력서를 불러와 텍스트 내용 추출 후 프론트엔드에 반환
-@api_view(['GET'])
+ess_key=s@api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def get_resume_text(request):
     import PyPDF2
@@ -1134,7 +1134,6 @@ def get_resume_text(request):
         # ✅ Presigned URL 생성
         s3 = boto3.client('s3',
                           aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
-                          aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
                           region_name=settings.AWS_S3_REGION_NAME)
 
         url = s3.generate_presigned_url(

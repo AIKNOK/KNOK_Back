@@ -59,7 +59,7 @@ jobs:
       id: render-backend
       uses: aws-actions/amazon-ecs-render-task-definition@v1
       with:
-        task-definition: ecs-task-def-backend.json
+        task-definition: ecs-task-def-backend.rendered.json
         container-name: knok-backend
         image: ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_BACKEND_REPO }}:latest
 

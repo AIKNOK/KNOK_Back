@@ -45,7 +45,16 @@ jobs:
         docker build -t $ECR_WEBSOCKET_REPO -f Dockerfile.websocket .
         docker tag $ECR_WEBSOCKET_REPO:latest $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_WEBSOCKET_REPO:latest
         docker push $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_WEBSOCKET_REPO:latest
-
+        
+    - name: Replace environment variables in backend task definition
+      run: |
+        sed -e "s|\${AWS_REGION}|${{ env.AWS_REGION }}|g" \
+            -e "s|\${DB_PASSWORD}|${{ secrets.DB_PASSWORD }}|g" \
+            -e "s|\${AWS_ACCESS_KEY_ID}|${{ secrets.AWS_ACCESS_KEY_ID }}|g" \
+            -e "s|\${AWS_SECRET_ACCESS_KEY}|${{ secrets.AWS_SECRET_ACCESS_KEY }}|g" \
+            -e "s|\${COGNITO_APP_CLIENT_SECRET}|${{ secrets.COGNITO_APP_CLIENT_SECRET }}|g" \
+            ecs-task-def-backend.json > ecs-task-def-backend.rendered.json    
+    
     - name: Render backend task definition
       id: render-backend
       uses: aws-actions/amazon-ecs-render-task-definition@v1

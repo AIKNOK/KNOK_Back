@@ -1,5 +1,5 @@
 {
-  "family": "knok-websocket-task",
+  "family": "knok-websocket-pri-task",
   "executionRoleArn": "arn:aws:iam::257120632536:role/ecsTaskExecutionRole",
   "networkMode": "awsvpc",
   "requiresCompatibilities": ["FARGATE"],
@@ -19,7 +19,7 @@
       "logConfiguration": {
         "logDriver": "awslogs",
         "options": {
-          "awslogs-group": "/ecs/knok-websocket-task",
+          "awslogs-group": "/ecs/knok-websocket-pri-task",
           "awslogs-region": "ap-northeast-2",
           "awslogs-stream-prefix": "ecs"
         }

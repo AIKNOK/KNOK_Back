@@ -9,6 +9,7 @@ from myapp.utils.keyword_extractor import extract_resume_keywords
 from myapp.utils.followup_logic import should_generate_followup
 from boto3.dynamodb.conditions import Key
 from urllib.parse import unquote
+from myapp.authentication import CognitoJWTAuthentication
 
 import requests
 import re
@@ -43,6 +44,11 @@ from botocore.exceptions import ClientError
 from datetime import datetime
 from django.core.cache import cache
 from .services.feedback_service import get_signed_pdf_url_by_video_id
+from django.views.decorators.http import require_GET
+from django.views.decorators.http import require_http_methods
+
+
+print("✅ [views.py] 파일 로드됨")
 
 # 🔐 SECRET_HASH 계산 함수 (Cognito)
 def get_secret_hash(username):
@@ -179,18 +185,26 @@ def logout_view(request):
 
 # 📤 이력서 업로드 API (S3 저장, DB 기록, 중복 업로드 차단)
 class ResumeUploadView(APIView):
+    authentication_classes = [CognitoJWTAuthentication]
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
+        print("📥 [ResumeUploadView] 업로드 요청 수신됨")
         # 1) 파일 유무 체크
         uploaded_file = request.FILES.get('resume')
         if not uploaded_file:
+            print("❌ 파일 없음: request.FILES =", request.FILES)
             return Response({"error": "파일이 없습니다."}, status=400)
 
         # ✅ 2) 사용자 이메일 + 원본 파일명으로 S3 경로 구성
+        if not request.user or not request.user.email:
+            print("❌ 사용자 인증 실패: request.user =", request.user)
+            return Response({"error": "인증된 사용자가 아닙니다."}, status=401)
+        
         email_prefix = request.user.email.split('@')[0]
         original_filename = uploaded_file.name
         key = f"resumes/{email_prefix}/{original_filename}"
+        print(f"📎 업로드 대상 key: {key}")
 
         s3 = boto3.client(
             's3',
@@ -201,10 +215,13 @@ class ResumeUploadView(APIView):
 
         try:
             s3.upload_fileobj(uploaded_file, settings.AWS_STORAGE_BUCKET_NAME, key)
+            print("✅ S3 업로드 성공")
         except Exception as e:
+            traceback.print_exc()
             return Response({"error": f"S3 업로드 실패: {str(e)}"}, status=500)
 
         file_url = f"https://{settings.AWS_S3_CUSTOM_DOMAIN}/{key}"
+        print(f"🔗 저장된 파일 URL: {file_url}")
 
         # ✅ 3) DB에도 업데이트 (이전 것 덮어씀)
         resume_obj, created = Resume.objects.update_or_create(
@@ -243,13 +260,23 @@ class ResumeDeleteView(APIView):
 
 # 🧾 이력서 조회 API (새로고침 시 프론트에서 조회)
 @api_view(['GET'])
+@authentication_classes([CognitoJWTAuthentication])
 @permission_classes([IsAuthenticated])
 def get_resume_view(request):
+    print("📌 현재 로그인된 사용자:", request.user, type(request.user))
+
+    if not request.user or not request.user.is_authenticated:
+        return Response({'error': '인증된 사용자가 아닙니다.'}, status=401)
+
     try:
-        resume = Resume.objects.get(user=request.user)
+        resume = Resume.objects.filter(user=request.user).first()
+        if not resume:
+            return Response({'file_url': None}, status=200)
+
         return Response({'file_url': resume.file_url}, status=200)
-    except Resume.DoesNotExist:
-        return Response({'file_url': None}, status=200)
+    except Exception as e:
+        traceback.print_exc()  # ✅ 이게 있어야 CloudWatch에 에러 줄 번호와 원인이 찍힘
+        return Response({'error': '서버 오류', 'detail': str(e)}, status=500)
 
 # 🧠 Claude에게 이력서 기반으로 질문 요청
 @api_view(['POST'])
@@ -749,19 +776,19 @@ def generate_feedback_report(request):
 [면접자 평가에 대한 전체적인 요약 1-2문장]
 
 === 일관성 ===
-- [답변 전체에 흐름이 있고 앞뒤가 자연스럽게 연결되는지에 대한 피드백]
+- [전체 답변 결과({transcribe_desc})를 바탕으로 답변 전체에 흐름이 있고 앞뒤가 자연스럽게 연결되는지에 대한 피드백]
 (점수: 0~5점 중 하나)
 
 === 논리성 ===
-- [주장에 대해 명확한 이유와 근거가 있으며 논리적 흐름이 있는지에 대한 피드백]
+- [전체 답변 결과({transcribe_desc})를 바탕으로 주장에 대해 명확한 이유와 근거가 있으며 논리적 흐름이 있는지에 대한 피드백]
 (점수: 0~5점 중 하나)
 
 === 대처능력 ===
-- [예상치 못한 질문에도 당황하지 않고 유연하게 답했는지에 대한 피드백]
+- [전체 답변 결과({transcribe_desc})를 바탕으로 예상치 못한 질문에도 당황하지 않고 유연하게 답했는지에 대한 피드백]
 (점수: 0~5점 중 하나)
 
 === 구체성 ===
-- [추상적인 설명보다 구체적인 경험과 예시가 포함되어 있는지에 대한 피드백]
+- [전체 답변 결과({transcribe_desc})를 바탕으로 추상적인 설명보다 구체적인 경험과 예시가 포함되어 있는지에 대한 피드백]
 (점수: 0~5점 중 하나)
 
 === 말하기방식 ===
@@ -930,30 +957,38 @@ def decide_followup_question(request):
     except Exception as e:
         return Response({'error': 'S3 저장 실패', 'detail': str(e)}, status=500)
 
-    # TTS 서버 호출
-    tts_url = "http://knok-tts-test-alb-1052508342.ap-northeast-2.elb.amazonaws.com/api/generate-followup-question/tts/"
-    try:
-        tts_response = requests.post(tts_url, json={
-            "question_number": followup_question_number,
-            "text": question
-        },
-        headers=headers
-        )
-        if tts_response.status_code != 200:
-            raise Exception(tts_response.text)
-        tts_result = tts_response.json()
-        audio_url = tts_result.get("file_url")
-    except Exception as e:
-        return Response({'error': 'TTS 호출 실패', 'detail': str(e)}, status=500)
 
-    return Response({
-        'followup': True,
-        'question_number': followup_question_number,
-        'question': question,
-        'audio_url': audio_url,
-        'matched_keywords': matched_keywords,
-        'keywords': keywords
-    })
+    sqs = boto3.client('sqs', region_name='ap-northeast-2')  # region은 실제 리전에 맞게 수정
+
+    # SQS URL 정의
+    QUEUE_URL = settings.AWS_SIMPLE_QUEUE_SERVICE
+
+    email = request.user.email.split('@')[0]
+
+    # SQS 메시지 구성 및 전달
+    message = {
+        "question_number": followup_question_number,
+        "text": question,
+        "headers" : headers
+    }
+
+    try:
+        response = sqs.send_message(
+            QueueUrl=QUEUE_URL,
+            MessageBody=json.dumps(message),
+            MessageGroupId=email,
+            MessageDeduplicationId=f"{email}-{int(time.time() * 1000)}"
+        )
+        return Response({
+            "message": "SQS에 요청 성공",
+            "sqs_message_id": response['MessageId']
+        }, status=200)
+
+    except Exception as e:
+        return Response({
+            "error": "SQS 전송 중 예외 발생",
+            "detail": str(e)
+        }, status=500)
 
 
 
@@ -1500,7 +1535,8 @@ def decide_resume_question(request):
             "detail": str(e)
         }, status=500)
 
-
+@csrf_exempt
+@require_http_methods(["GET", "HEAD"])
 def health_check(request):
     return JsonResponse({"status": "ok"})
   
@@ -1626,3 +1662,4 @@ def extract_question_clip_segments(request):
         "message": "클립 segment 처리 완료",
         "clips": results
     })
+    return JsonResponse({"status": "ok"})

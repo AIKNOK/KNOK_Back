@@ -5,6 +5,7 @@ from datetime import datetime
 from amazon_transcribe.client import TranscribeStreamingClient
 from starlette.websockets import WebSocketDisconnect
 from dotenv import load_dotenv
+from fastapi import FastAPI
 
 import boto3
 import requests
@@ -284,3 +285,7 @@ async def refine_transcript_with_claude(transcript_text: str) -> str:
     except Exception as e:
         print("❌ Claude (Bedrock) 호출 실패:", e)
         return transcript_text
+
+@app.get("/api/health")
+async def health_check():
+    return {"status": "ok"}

@@ -1,0 +1,79 @@
+name: Deploy Django + WebSocket to ECS
+
+on:
+  push:
+    branches: [ main ]
+
+env:
+  AWS_REGION: ap-northeast-2
+  ECR_BACKEND_REPO: knok-backend
+  ECR_WEBSOCKET_REPO: knok-websocket
+  ECS_BACKEND_SERVICE: knok-backend-service
+  ECS_WEBSOCKET_SERVICE: knok-websocket-service
+  ECS_CLUSTER: knok-cluster-pri
+  AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout source
+      uses: actions/checkout@v3
+
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v2
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
+
+    - name: Login to Amazon ECR
+      uses: aws-actions/amazon-ecr-login@v1
+
+    - name: Free disk space before Docker build
+      run: docker system prune -af
+
+    - name: Build and push Backend image
+      run: |
+        docker build -t $ECR_BACKEND_REPO -f Dockerfile.backend .
+        docker tag $ECR_BACKEND_REPO:latest $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_BACKEND_REPO:latest
+        docker push $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_BACKEND_REPO:latest
+
+    - name: Build and push WebSocket image
+      run: |
+        docker build -t $ECR_WEBSOCKET_REPO -f Dockerfile.websocket .
+        docker tag $ECR_WEBSOCKET_REPO:latest $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_WEBSOCKET_REPO:latest
+        docker push $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_WEBSOCKET_REPO:latest
+
+    - name: Render backend task definition
+      id: render-backend
+      uses: aws-actions/amazon-ecs-render-task-definition@v1
+      with:
+        task-definition: ecs-task-def-backend.json
+        container-name: knok-backend
+        image: ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_BACKEND_REPO }}:latest
+
+    - name: Render websocket task definition
+      id: render-websocket
+      uses: aws-actions/amazon-ecs-render-task-definition@v1
+      with:
+        task-definition: ecs-task-def-websocket.json
+        container-name: knok-websocket
+        image: ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_WEBSOCKET_REPO }}:latest
+
+    - name: Deploy Backend to ECS
+      uses: aws-actions/amazon-ecs-deploy-task-definition@v1
+      with:
+        cluster: ${{ env.ECS_CLUSTER }}
+        service: ${{ env.ECS_BACKEND_SERVICE }}
+        task-definition: ${{ steps.render-backend.outputs.task-definition }}
+        wait-for-service-stability: false  # ✅ 대기 없이 배포 후 진행
+
+    - name: Deploy WebSocket to ECS
+      uses: aws-actions/amazon-ecs-deploy-task-definition@v1
+      with:
+        cluster: ${{ env.ECS_CLUSTER }}
+        service: ${{ env.ECS_WEBSOCKET_SERVICE }}
+        task-definition: ${{ steps.render-websocket.outputs.task-definition }}
+        wait-for-service-stability: false  # ✅ 대기 없이 배포 후 진행

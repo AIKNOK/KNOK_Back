@@ -11,9 +11,9 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 """
 
 from pathlib import Path
-from decouple import config
 from datetime import timedelta
 from corsheaders.defaults import default_headers
+import os
 
 import logging
 logging.basicConfig(level=logging.DEBUG)
@@ -31,7 +31,7 @@ SECRET_KEY = 'django-insecure-acglm2hmr87(e-83fxvlq(reeayyih&s50qp1!3ilbj6!3(ymu
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = False
 
-ALLOWED_HOSTS = ["api.ai-knok.com", "localhost", "127.0.0.1"]
+ALLOWED_HOSTS = ["*",]
 
 
 # Application definition
@@ -60,12 +60,22 @@ MIDDLEWARE = [
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
 
+CORS_ALLOW_ALL_ORIGINS = True
 
 CORS_ALLOWED_ORIGINS = [
     "https://ai-knok.com",
-    "https://www.ai-knok.com",
-    "http://localhost:5173",
+    "https://www.ai-knok.com",           
+    "https://api.ai-knok.com",  
 ]
+
+CORS_ALLOW_CREDENTIALS = True
+
+#CORS_ALLOWED_ORIGINS = [
+   # "https://ai-knok.com",                # ✅ 프론트엔드 도메인
+  #  "https://www.ai-knok.com",            # ✅ 서브도메인도 같이
+ #   "https://api.ai-knok.com",            # ✅ API 요청용 도메인
+#]
+
 
 ROOT_URLCONF = 'config.urls'
 
@@ -140,22 +150,33 @@ STATIC_URL = 'static/'
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 # AWS Cognito 설정
-AWS_REGION = config("AWS_REGION")
-COGNITO_USER_POOL_ID = config("COGNITO_USER_POOL_ID")
-COGNITO_APP_CLIENT_ID = config("COGNITO_APP_CLIENT_ID")
-COGNITO_APP_CLIENT_SECRET = config("COGNITO_APP_CLIENT_SECRET")
+AWS_REGION = os.environ.get("AWS_REGION")
+COGNITO_USER_POOL_ID = os.environ.get("COGNITO_USER_POOL_ID")
+COGNITO_APP_CLIENT_ID = os.environ.get("COGNITO_APP_CLIENT_ID")
+COGNITO_APP_CLIENT_SECRET = os.environ.get("COGNITO_APP_CLIENT_SECRET")
 
 # --- AWS S3 설정 ---
-AWS_ACCESS_KEY_ID = config('AWS_ACCESS_KEY_ID')
-AWS_SECRET_ACCESS_KEY = config('AWS_SECRET_ACCESS_KEY')
-AWS_STORAGE_BUCKET_NAME = config('AWS_STORAGE_BUCKET_NAME')
-AWS_AUDIO_BUCKET_NAME = config("AWS_AUDIO_BUCKET_NAME")
-AWS_FULL_VIDEO_BUCKET_NAME = config("AWS_FULL_VIDEO_BUCKET_NAME")
-AWS_CLIP_VIDEO_BUCKET_NAME = config("AWS_CLIP_VIDEO_BUCKET_NAME")
-AWS_S3_REGION_NAME = config('AWS_S3_REGION_NAME')
-AWS_S3_CUSTOM_DOMAIN = f"{AWS_STORAGE_BUCKET_NAME}.s3.amazonaws.com"
-AWS_TTS_BUCKET_NAME = config("TTS_BUCKET_NAME")
-AWS_FOLLOWUP_QUESTION_BUCKET_NAME = config("AWS_FOLLOWUP_QUESTION_BUCKET_NAME")
+AWS_ACCESS_KEY_ID = os.environ.get('AWS_ACCESS_KEY_ID')
+AWS_SECRET_ACCESS_KEY = os.environ.get('AWS_SECRET_ACCESS_KEY')
+AWS_STORAGE_BUCKET_NAME = os.environ.get('AWS_STORAGE_BUCKET_NAME')
+AWS_AUDIO_BUCKET_NAME = os.environ.get("AWS_AUDIO_BUCKET_NAME")
+AWS_FULL_VIDEO_BUCKET_NAME = os.environ.get("AWS_FULL_VIDEO_BUCKET_NAME")
+AWS_CLIP_VIDEO_BUCKET_NAME = os.environ.get("AWS_CLIP_VIDEO_BUCKET_NAME")
+AWS_S3_REGION_NAME = os.environ.get('AWS_S3_REGION_NAME')
+AWS_S3_CUSTOM_DOMAIN = "ai-knok.com"
+AWS_TTS_BUCKET_NAME = os.environ.get("TTS_BUCKET_NAME")
+AWS_FOLLOWUP_QUESTION_BUCKET_NAME = os.environ.get("AWS_FOLLOWUP_QUESTION_BUCKET_NAME")
+
+try:
+    print("✅ [settings.py] 환경변수 로드 완료")
+    print("  - S3 버킷 이름:", AWS_STORAGE_BUCKET_NAME)
+    print("  - 리전:", AWS_REGION)
+    print("  - Cognito Client ID:", COGNITO_APP_CLIENT_ID)
+except Exception as e:
+    print("❌ [settings.py] 환경변수 로드 실패:", e)
+
+
+DEFAULT_FILE_STORAGE = 'storages.backends.s3boto3.S3Boto3Storage'
 
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': [
@@ -178,8 +199,13 @@ SIMPLE_JWT = {
     "VERIFY_AUDIENCE": False,  # 👈 이 줄이 핵심입니다
 }
 
-
 # History 페이지에서 사용할 CloudFront 키
 CLOUDFRONT_KEY_PAIR_ID = config("CLOUDFRONT_KEY_PAIR_ID")
 CLOUDFRONT_DOMAIN = config("CLOUDFRONT_DOMAIN")
 CLOUDFRONT_SECRET_NAME=config("CLOUDFRONT_SECRET_NAME")
+
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+
+SECURE_SSL_REDIRECT = False
+SESSION_COOKIE_SECURE = False
+CSRF_COOKIE_SECURE = False

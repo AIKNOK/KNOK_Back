@@ -14,6 +14,7 @@ JWKS_URL = f"https://cognito-idp.{COGNITO_REGION}.amazonaws.com/{COGNITO_POOL_ID
 
 class CognitoJWTAuthentication(BaseAuthentication):
     def authenticate(self, request):
+        print("✅ [CognitoJWTAuthentication] 호출됨")
         auth_header = request.headers.get('Authorization')
         if not auth_header or not auth_header.startswith('Bearer '):
             return None

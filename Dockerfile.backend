@@ -1,18 +1,36 @@
-# Dockerfile.backend
-FROM python:3.11-slim
-
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
-    python3-dev \
-    ffmpeg \
-    && rm -rf /var/lib/apt/lists/*
+FROM python:3.10-slim AS builder
 
 WORKDIR /app
 
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+COPY requirements.backend.txt ./requirements.backend.txt
+COPY requirements.common.txt ./requirements.common.txt
 
-COPY backend/ ./backend/
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc g++ make libpq-dev python3-dev libffi-dev libsndfile1 ffmpeg libgl1 \
+ && rm -rf /var/lib/apt/lists/* \
+ && pip install --upgrade pip \
+ && pip install --no-cache-dir -r requirements.backend.txt
+
+FROM python:3.10-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PYTHONPATH="/app/backend"
+
 WORKDIR /app/backend
 
-CMD ["gunicorn", "config.wsgi:application", "--bind", "0.0.0.0:8000", "--workers=1", "--timeout=90"]
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libpq-dev libsndfile1 ffmpeg libgl1 \
+ && rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /usr/local/lib/python3.10/site-packages /usr/local/lib/python3.10/site-packages
+COPY --from=builder /usr/local/bin /usr/local/bin
+
+# 📁 백엔드 앱과 entrypoint 스크립트 복사
+COPY backend /app/backend
+COPY backend/entrypoint.sh /app/backend/entrypoint.sh
+RUN chmod +x /app/backend/entrypoint.sh
+
+EXPOSE 8000
+
+CMD ["./entrypoint.sh"]

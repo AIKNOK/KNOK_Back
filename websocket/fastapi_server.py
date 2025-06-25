@@ -103,9 +103,13 @@ async def transcribe_ws(websocket: WebSocket, email: str = Query(...), question_
     try:
         print("asyncio.gather 실행")
         email_prefix = email.split('@')[0]
-        if email not in upload_id_cache:
-            upload_id_cache[email] = get_upload_id(email_prefix)
-        upload_id = upload_id_cache[email]
+
+        upload_id = upload_id_cache.get(email)
+        if not upload_id:
+            print("⚠️ upload_id_cache에 없음, 새로 생성합니다.")
+            upload_id = get_upload_id(email_prefix)
+            upload_id_cache[email] = upload_id
+
         # 클라이언트에 upload_id 전송
         await websocket.send_text(json.dumps({
             "type":      "upload_id",
@@ -120,6 +124,9 @@ async def transcribe_ws(websocket: WebSocket, email: str = Query(...), question_
     finally:
         print("✅ WebSocket STT 완료")
         try:
+            # ✅ Claude 호출 전에 transcript_text 로그
+            print("📝 최종 transcript_text:", repr(transcript_text))
+
              # Claude 3.5로 전사 보정
             refined_transcript = await refine_transcript_with_claude(transcript_text)
 

@@ -17,6 +17,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PYTHONPATH="/app/backend"
 
+# 고정 질문 오디오 폴더를 컨테이너에 복사
+WORKDIR /app/audio
+COPY audio /app/audio
+
 WORKDIR /app/backend
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -25,8 +29,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 COPY --from=builder /usr/local/lib/python3.10/site-packages /usr/local/lib/python3.10/site-packages
 COPY --from=builder /usr/local/bin /usr/local/bin
-
-COPY audio /app/audio
 
 # 📁 백엔드 앱과 entrypoint 스크립트 복사
 COPY backend /app/backend

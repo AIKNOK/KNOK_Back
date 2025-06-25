@@ -325,37 +325,50 @@ def generate_resume_questions(request):
     # Claude 프롬프트 생성
      # ✅ 난이도별 지침 설정
     difficulty_prompt = {
-        "쉬움": "부담 없이 답할 수 있는 질문을 만들어주세요. 자기소개, 간단한 경험 중심으로 해주세요.",
+        "쉬움": "부담 없이 답할 수 있는 질문을 만들어주세요. 이력서에 나와있는 내용 중심과 간단한 경험 중심으로 해주세요.",
         "중간": "기술, 프로젝트, 협업 상황에 대해 본인이 설명할 수 있는 수준의 구체적인 질문을 만들어주세요.",
-        "어려움": "한 가지 주제에 깊이 있게 질문해주세요. 예: 기술 선택 이유, 문제 해결 전략, 아키텍처 설계 판단 등. 한 문장에 여러 질문을 넣지 마세요. 사고력을 요하는 질문이어야 합니다."
+        "어려움": "한 가지 주제에 깊이 있게 질문해주세요. 특히 사용한 기술이 있다면 기술에 대해 전문적인 지식을 요구하는 질문을 만들어주세요. 예: 기술 선택 이유, 문제 해결 전략, 아키텍처 설계 판단 등. 한 문장에 여러 질문을 넣지 마세요. 사고력을 요하는 질문이어야 합니다."        
     }.get(difficulty, "")
     
     # ✅ Claude 프롬프트 생성 
     prompt = f"""
-    당신은 AI 면접 질문 생성기입니다.
+    당신은 뛰어난 AI 면접관입니다. 아래 이력서를 기반으로 면접 질문을 생성해주세요.
 
-    다음은 이력서 내용입니다:
+    [이력서 내용]
     {text}
 
-    이력서를 바탕으로 해당 지원자가 실제 면접에서 받을 법한 면접 질문을 3개 작성해 주세요.
-    형식은 아래와 같이 해주세요:
-
+    [질문 작성 규칙]
     - 이력서에 언급된 기술, 경험, 프로젝트, 직무 관련 내용에서만 질문을 추출하세요.
-    - 자기소개, 기술 역량, 협업/갈등 해결, 문제 해결 방식 등을 중심으로 구성하세요.
-    - 절대로 질문 앞에 숫자나 'Q1' 같은 접두어를 붙이지 마세요.
-    - 질문만 한 줄씩 출력하세요.
-    - 줄바꿈으로 각 질문을 구분하세요.
-
-    난이도 지침:
-    - {difficulty_prompt}
+    - 자기소개에 대한 내용은 절대로 언급하지 마세요.
+    - 질문은 총 3개이며, 모두 동일한 난이도 기준으로 작성하세요. (난이도: {difficulty})
+    - 난이도는 참고용입니다. 출력에 절대 포함하지 마세요.
+    - 질문 앞에 '중간 난이도 질문:', 'Q1.', '숫자', '-', '*' 등 어떤 형식이든 절대로 붙이지 마세요.
+    - 절대로 안내 문구, 제목, 카테고리 구분 같은 텍스트는 출력하지 마세요.
+    - 각 질문은 완전한 자연어 문장으로 구성하세요
+    - 기술 역량, 협업/갈등 해결, 문제 해결 방식 등을 중심으로 구성하세요.
+    - 질문 내용만 줄바꿈으로 구분해 출력하세요.
+    - '귀하'라는 표헌을 사용하지 말고 '본인' 또는 이력서에 이름이 있다면 이름으로 사용해주세요.
     
-    예시 출력 형식:
+    [난이도 지침(출력 금지, 참고만 할 것)]
+    - {difficulty_prompt}
+    - 질문 난이도는 위 난이도 지침을 참고하세요. 쉬움,중간,어려움의 질문 차이가 명확해야합니다.
+
+    [출력 형식 규칙] — 위반 시 실패
+    - 질문 앞에 **숫자, Q1, - , : ,등의 접두어는 절대로 붙이지 마세요.**
+    - **KOREAN ELECTRONICS** 같은 번역된 표현은 사용하지 마세요. 반드시 이력서에 있는 **원어 그대로 사용**하세요.
+    - 모든 질문은 **대문자로 시작**하고, **완전한 자연어 문장**이어야 합니다.
+    - '귀하'라는 표현 대신 **항상 ‘본인’**을 사용하세요. 이름이 있다면 이름을 써도 됩니다.
+    - 출력은 반드시 줄바꿈으로 구분된 질문 3개만 포함해야 하며, 다른 말은 절대로 출력하지 마세요.
+
+    [예시 출력 형식]
     React 프로젝트에서 성능 최적화를 위해 어떤 방법을 사용하셨나요?
     협업 중 의견 충돌이 있었을 때 어떻게 해결하셨나요?
     본인의 기술 역량 중 가장 자신 있는 부분은 무엇인가요?
     지원하신 직무와 관련해 가장 자신 있는 기술 스택은 무엇인가요?
     해당 기술을 활용해 문제를 해결했던 경험을 말씀해 주세요.
     팀 프로젝트에서 본인이 맡았던 역할과 해결한 기술적 문제는 무엇이었나요?
+
+    위 정보를 기반으로 면접관이 물어볼 수 있는 질문 3개를 리스트로 출력하세요.
     """
 
     # Claude 호출 (1차 질문 생성)
@@ -381,22 +394,42 @@ def generate_resume_questions(request):
 
     # ✅ Claude 검증 프롬프트 (고정 질문 제외)
     verify_prompt = f"""
-다음은 사용자의 이력서와 AI가 생성한 면접 질문 목록입니다.
+    당신은 뛰어난 AI 면접 관리자입니다. 아래 이력서를 기반으로 생성된 질문을 검토하고, 정확히 **3개의 질문만** 출력해야 합니다.
 
-이력서:
-{text}
+    [이력서 내용]
+    {text}
 
-AI가 생성한 질문:
-{chr(10).join(questions)}
+    [생성된 질문]
+    {chr(10).join(questions)}
 
-요청:
-- 아래 기준에 따라 질문이 이력서와 실제로 관련 있는지 판단해 주세요.
-- "기술 스택", "업무 경험", "학습 내용", "프로젝트", "자격증", "직무 관심도" 등 이력서에 실제로 언급된 내용과 관련된 질문만 남겨 주세요.
-- 관련 없는 질문은 제거하거나, 관련된 내용으로 수정해 주세요.
-- 질문 앞에 숫자나 Q1 같은 접두어는 붙이지 마세요.
-- 질문만 줄바꿈으로 구분해서 출력하세요.
+    [난이도 지침(출력 금지, 참고만 할 것)]
+    - {difficulty_prompt}
+    - 질문 난이도는 위 난이도 지침을 참고하세요.
 
-"""
+    [검토 지침]
+    - 오직 이력서에 실제로 언급된 기술, 경험, 프로젝트에 관련된 질문만 남겨야 합니다.
+    - 관련 없는 질문은 제거하거나, **이력서의 관련 내용을 기반으로 수정**해 주세요.
+    - 질문의 난이도에 맞는지 검토하고, **어려움**일 경우에는 특정 기술에 대해 전문적인 지식을 요구하는 수준의 질문으로 수정해주세요.
+    - **질문은 정확히 3개만** 출력합니다.
+
+    [출력 형식 규칙] — 위반 시 실패
+    - 질문 앞에 **숫자, Q1, - 등의 접두어는 절대로 붙이지 마세요.**
+    - **KOREAN ELECTRONICS** 같은 번역된 표현은 사용하지 마세요. 반드시 이력서에 있는 **원어 그대로 사용**하세요.
+    - 모든 질문은 **대문자로 시작**하고, **완전한 자연어 문장**이어야 합니다.
+    - '귀하'라는 표현 대신 **항상 ‘본인’**을 사용하세요. 이름이 있다면 이름을 써도 됩니다.
+    - 출력은 반드시 줄바꿈으로 구분된 질문 3개만 포함해야 하며, 다른 말은 절대로 출력하지 마세요.
+
+    [나쁜 예시] — 이런 출력은 실패입니다.
+    1. 홍길동, 본인이 참여한 프로젝트는 무엇인가요?
+    - Python 프로젝트 경험에 대해 말씀해 주세요.
+    Q3. 전자회사에서 어떤 기술을 썼나요?
+
+    [좋은 예시 - 다음 예시는 절대로 따라 쓰지 마세요. 이력서와 무관한 예시입니다.]
+    본인이 한국전자에서 수행한 AI 프로젝트에서 맡은 역할과 해결한 문제는 무엇이었나요?  
+    개발 동아리 활동 중 협업에서 겪은 어려움을 어떻게 해결하셨나요?  
+    본인이 개발한 NLP 모델의 핵심 기술과 성능 향상 전략은 무엇이었나요?
+
+    """
     verify_body = {
         "anthropic_version": "bedrock-2023-05-31",
         "max_tokens": 512,
@@ -415,7 +448,10 @@ AI가 생성한 질문:
     print("✅ Claude 검증 완료 질문:", verified_questions)
 
     # 고정 질문
-    final_questions = ["간단히 자기소개 부탁드릴게요"] + verified_questions[:3]
+    fixed_questions_1 = ["안녕하세요, 면접 시작하겠습니다. 간단하게 자기소개 부탁드릴게요."]
+    fixed_questions_5 = ["네, 수고하셨습니다. 면접 마무리하기 전에, 오늘 면접에서 꼭 전달하고 싶었던 내용이 있다면 마지막으로 말씀해 주세요."]
+
+    final_questions =  fixed_questions_1 + verified_questions[:3] + fixed_questions_5
     print("📦 최종 질문 (고정 + 검증된 질문):", final_questions)
 
     for idx, question in enumerate(final_questions, start=1):
@@ -427,6 +463,22 @@ AI가 생성한 질문:
             ContentType='text/plain'
         )
 
+    FIXED_AUDIO_FILES = {
+    1: "/app/audio/questions1.wav",
+    5: "/app/audio/questions5.wav"
+}
+    bucket_tts = settings.AWS_TTS_BUCKET_NAME  # 또는 실제 TTS 업로드용 버킷 이름
+
+    for idx in FIXED_AUDIO_FILES:
+        local_path = FIXED_AUDIO_FILES[idx]
+        s3_key = f"{email_prefix}/questions{idx}.wav"
+        try:
+            with open(local_path, 'rb') as audio_file:
+                s3.upload_fileobj(audio_file, bucket_tts, s3_key)
+            print(f"고정 질문 {idx}번 wav 업로드 완료: {s3_key}")
+        except Exception as e:
+            print(f"질문 {idx}번 wav 업로드 실패: {e}")
+
     auth_header = request.headers.get('Authorization', '')
     if not auth_header.startswith('Bearer '):
         return Response({'error': 'Authorization 헤더가 없습니다.'}, status=401)
@@ -435,21 +487,33 @@ AI가 생성한 질문:
     headers = {
         "Authorization": f"Bearer {token}"
     }
+    sqs = boto3.client('sqs', region_name='ap-northeast-2')  # region은 실제 리전에 맞게 수정
+    QUEUE_URL = 'https://sqs.ap-northeast-2.amazonaws.com/257120632536/tts-request-queue.fifo'
+
+    email = request.user.email.split('@')[0]
+    
+    # SQS 메시지 구성
+    message = {
+        "headers": headers
+    }
+
     try:
-        tts_response = requests.post(
-            "http://knok-tts-test-alb-1052508342.ap-northeast-2.elb.amazonaws.com/api/generate-resume-question/",
-            headers=headers,
-            timeout=60
+        response = sqs.send_message(
+            QueueUrl=QUEUE_URL,
+            MessageBody=json.dumps(message),
+            MessageGroupId=email,
+            MessageDeduplicationId=email
         )
-        if tts_response.status_code != 200:
-            print("❌ TTS 생성 실패:", tts_response.text)
-        else:
-            print("✅ TTS 생성 완료")
+        return Response({
+            "message": "SQS에 요청 성공",
+            "sqs_message_id": response['MessageId']
+        }, status=200)
+
     except Exception as e:
-        print("❗ TTS 호출 중 예외 발생:", e)
-
-    return Response({"message": "질문 저장 완료", "questions": final_questions})
-
+        return Response({
+            "error": "SQS 전송 중 예외 발생",
+            "detail": str(e)
+        }, status=500)
 
 
 # Claude 3 호출 함수 추가

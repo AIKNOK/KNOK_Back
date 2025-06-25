@@ -104,11 +104,18 @@ async def transcribe_ws(websocket: WebSocket, email: str = Query(...), question_
         print("asyncio.gather 실행")
         email_prefix = email.split('@')[0]
 
-        upload_id = upload_id_cache.get(email)
-        if not upload_id:
+        upload_id_entry = upload_id_cache.get((email, question_id))
+        if not upload_id_entry:
             print("⚠️ upload_id_cache에 없음, 새로 생성합니다.")
             upload_id = get_upload_id(email_prefix)
-            upload_id_cache[email] = upload_id
+            upload_id_entry = {
+                "upload_id": upload_id,
+                "transcript": "",
+                "audio_bytes": bytearray(),
+            }
+            upload_id_cache[(email, question_id)] = upload_id_entry
+        else:
+            upload_id = upload_id_entry["upload_id"]
 
         # 클라이언트에 upload_id 전송
         await websocket.send_text(json.dumps({
@@ -132,9 +139,9 @@ async def transcribe_ws(websocket: WebSocket, email: str = Query(...), question_
              # Claude 3.5로 전사 보정
             refined_transcript = await refine_transcript_with_claude(transcript_text)
 
-            if upload_id is not None:
+            if upload_id_entry is not None:
                 # 오디오 저장
-                save_audio_to_s3(audio_buffer, email, upload_id, question_id)
+                save_audio_to_s3(upload_id_entry["audio_bytes"], email, upload_id, question_id)
                 save_transcript_to_s3(refined_transcript, email, upload_id, question_id)
             else:
                 print("⚠️ 후처리 생략: upload_id 없음")

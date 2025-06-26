@@ -116,7 +116,7 @@ async def transcribe_ws(websocket: WebSocket, email: str = Query(...), question_
 
         upload_id_entry = upload_id_cache.get((email, question_id))
         if not upload_id_entry:
-            print("⚠️ upload_id_cache에 없음, 새로 생성합니다.")
+            print("⚠️ upload_id_cache에 없음, 새로 생성")
             upload_id = get_upload_id(email_prefix)
             upload_id_entry = {
                 "upload_id": upload_id,
@@ -133,12 +133,12 @@ async def transcribe_ws(websocket: WebSocket, email: str = Query(...), question_
             "upload_id": upload_id
         }))
         
-        await asyncio.gather(
-            send_audio(),           # 👂 오디오 계속 받으면서
-            handle_transcription(),  # ✍️ 동시에 Transcribe 결과도 계속 수신
-            handle_text_messages()
-        )
+        await send_audio()
+        await stream.input_stream.end_stream()  # ✅ 오디오 스트림 닫기 명시
+        await handle_transcription()
+        await handle_text_messages()
         await stream.input_stream.end_stream()  # 수신 후 명시적으로 종료
+    
     except Exception as e:
         print("🔥 전사 실패:", e)
     finally:
@@ -151,11 +151,15 @@ async def transcribe_ws(websocket: WebSocket, email: str = Query(...), question_
             refined_transcript = await refine_transcript_with_claude(transcript_text)
 
             if upload_id_entry is not None:
-                # 오디오 저장
-                save_audio_to_s3(upload_id_entry["audio_bytes"], email, upload_id, question_id)
-                save_transcript_to_s3(refined_transcript, email, upload_id, question_id)
-            else:
-                print("⚠️ 후처리 생략: upload_id 없음")
+                if upload_id_entry["audio_bytes"]:
+                    save_audio_to_s3(upload_id_entry["audio_bytes"], email, upload_id, question_id)
+                else:
+                    print("⚠️ 저장 생략: 오디오 데이터 없음")
+
+                if refined_transcript.strip():
+                    save_transcript_to_s3(refined_transcript, email, upload_id, question_id)
+                else:
+                    print("⚠️ 저장 생략: 텍스트 전사 없음")
                 
             # ✅ 보정된 텍스트 저장 및 전송
             send_transcript_to_django(email, question_id, refined_transcript, token)

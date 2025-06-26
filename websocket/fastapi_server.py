@@ -114,7 +114,9 @@ async def transcribe_ws(websocket: WebSocket, email: str = Query(...), question_
         print("asyncio.gather 실행")
         email_prefix = email.split('@')[0]
 
-        upload_id_entry = upload_id_cache.get(email)
+        upload_id_key = f"{email}-{question_id}"
+        upload_id_entry = upload_id_cache.get(upload_id_key)
+        
         if not upload_id_entry:
             upload_id = get_upload_id(email_prefix)
             upload_id_entry = {
@@ -122,7 +124,7 @@ async def transcribe_ws(websocket: WebSocket, email: str = Query(...), question_
                 "transcript": "",
                 "audio_bytes": bytearray(),
             }
-            upload_id_cache[email] = upload_id_entry
+            upload_id_cache[upload_id_key] = upload_id_entry
 
         # 클라이언트에 upload_id 전송
         await websocket.send_text(json.dumps({

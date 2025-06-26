@@ -60,6 +60,7 @@ async def transcribe_ws(websocket: WebSocket, email: str = Query(...), question_
 
                 print(f"오디오 수신됨: {len(data)} bytes")
                 audio_buffer.extend(data)
+                upload_id_entry["audio_bytes"].extend(data)
 
                 try:
                     # 메모리뷰/문자열 방어 코드

@@ -97,16 +97,6 @@ async def transcribe_ws(websocket: WebSocket, email: str = Query(...), question_
             print("❗ 전사 핸들링 예외:", e)
         finally:
             print("Transcribe 결과 수신 종료됨")
-    
-    async def handle_text_messages():
-        try:
-            while True:
-                msg = await websocket.receive_text()
-                print("📩 텍스트 메시지 수신:", msg)
-        except WebSocketDisconnect:
-            print("📴 WebSocket 텍스트 연결 종료")
-        except Exception as e:
-            print("❗ 텍스트 메시지 처리 중 예외:", e)
 
     upload_id = None
 
@@ -135,8 +125,7 @@ async def transcribe_ws(websocket: WebSocket, email: str = Query(...), question_
         
         await asyncio.gather(
             send_audio(),           # 👂 오디오 계속 받으면서
-            handle_transcription(),  # ✍️ 동시에 Transcribe 결과도 계속 수신
-            handle_text_messages()
+            handle_transcription()  # ✍️ 동시에 Transcribe 결과도 계속 수신
         )
         await stream.input_stream.end_stream()  # 수신 후 명시적으로 종료
     except Exception as e:

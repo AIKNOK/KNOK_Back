@@ -17,6 +17,14 @@
           "protocol": "tcp"
         }
       ],
+      "environment": [
+        { "name": "AWS_ACCESS_KEY_ID", "value": "${AWS_ACCESS_KEY_ID}" },
+        { "name": "AWS_AUDIO_BUCKET_NAME", "value": "live-stt" },
+        { "name": "AWS_REGION", "value": "${AWS_REGION}" },
+        { "name": "AWS_SECRET_ACCESS_KEY", "value": "${AWS_SECRET_ACCESS_KEY}" },
+        { "name": "DJANGO_API_URL", "value": "https://api.ai-knok.com/api/save_transcribed_text/" }
+      ],
+
       "logConfiguration": {
         "logDriver": "awslogs",
         "options": {

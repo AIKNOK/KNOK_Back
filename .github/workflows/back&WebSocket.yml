@@ -62,12 +62,20 @@ jobs:
         task-definition: ecs-task-def-backend.rendered.json
         container-name: knok-backend
         image: ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_BACKEND_REPO }}:latest
+    
+    - name: Replace environment variables in websocket task definition
+      run: |
+        sed -e "s|\${AWS_REGION}|${{ env.AWS_REGION }}|g" \
+            -e "s|\${AWS_ACCESS_KEY_ID}|${{ secrets.AWS_ACCESS_KEY_ID }}|g" \
+            -e "s|\${AWS_SECRET_ACCESS_KEY}|${{ secrets.AWS_SECRET_ACCESS_KEY }}|g" \
+            ecs-task-def-websocket.json > ecs-task-def-websocket.rendered.json    
+        
 
     - name: Render websocket task definition
       id: render-websocket
       uses: aws-actions/amazon-ecs-render-task-definition@v1
       with:
-        task-definition: ecs-task-def-websocket.json
+        task-definition: ecs-task-def-websocket.rendered.json 
         container-name: knok-websocket
         image: ${{ env.AWS_ACCOUNT_ID }}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.ECR_WEBSOCKET_REPO }}:latest
 

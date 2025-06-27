@@ -1776,7 +1776,7 @@ def get_clips_and_segments(request):
     result = []
     for clip_key in clip_keys:
         seg_id = clip_key.split('/')[-1].replace('.mp4', '')
-        thumb_key = f"thumbnails/{email_prefix}/{interview_id}_{seg_id.replace('seg', 'thumb')}.jpg"
+        thumb_key = f"thumbnails/{email_prefix}/{seg_id.replace('seg', 'thumb')}.jpg"
         clip_url = s3.generate_presigned_url('get_object', Params={
             'Bucket': settings.AWS_CLIP_VIDEO_BUCKET_NAME, 'Key': clip_key
         }, ExpiresIn=3600)

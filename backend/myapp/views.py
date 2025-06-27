@@ -501,7 +501,7 @@ def generate_resume_questions(request):
         response = sqs.send_message(
             QueueUrl=QUEUE_URL,
             MessageBody=json.dumps(message),
-            MessageGroupId=email,
+            MessageGroupId="global",
             MessageDeduplicationId=email
         )
         return Response({

@@ -91,6 +91,7 @@ async def transcribe_ws(websocket: WebSocket, email: str = Query(...), question_
                 for result in event.transcript.results:
                     if not result.is_partial and result.alternatives:
                         text = result.alternatives[0].transcript
+                        print("➡️ 받은 텍스트:", repr(text))
                         if text.strip():
                             transcript_text += text + "\n"
                             await websocket.send_text(json.dumps({"transcript": text}))
@@ -143,12 +144,12 @@ async def transcribe_ws(websocket: WebSocket, email: str = Query(...), question_
     finally:
         print("✅ WebSocket STT 완료")
         try:
-            # ✅ Claude 호출 전에 transcript_text 로그
-            print("📝 최종 transcript_text:", repr(transcript_text))
+            print("📤 Django 전송 전 원본 텍스트:", repr(transcript_text))
 
              # Claude 3.5로 전사 보정
             refined_transcript = await refine_transcript_with_claude(transcript_text)
 
+            print("📤 Claude 보정 후 텍스트:", repr(refined_transcript))
             if upload_id_entry is not None:
                 if upload_id_entry["audio_bytes"]:
                     save_audio_to_s3(upload_id_entry["audio_bytes"], email, upload_id, question_id)

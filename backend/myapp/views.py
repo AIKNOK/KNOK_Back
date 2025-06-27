@@ -946,6 +946,10 @@ def receive_posture_count(request):
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def decide_followup_question(request):
+    print("✅ [decide_followup_question] API 요청 수신됨")
+    print("📄 resume_text 길이:", len(resume_text) if resume_text else "None")
+    print("🗣️ user_answer 길이:", len(user_answer) if user_answer else "None")
+
     auth_header = request.headers.get('Authorization', '')
     if not auth_header.startswith('Bearer '):
         return Response({'error': 'Authorization 헤더가 없습니다.'}, status=401)

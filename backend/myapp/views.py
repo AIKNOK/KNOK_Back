@@ -969,6 +969,13 @@ def decide_followup_question(request):
     should_generate = should_generate_followup(user_answer, keywords)
     matched_keywords = [kw for kw in keywords if kw in user_answer]
 
+    print("✅ 꼬리질문 디버깅 시작")
+    print("📄 이력서 키워드:", keywords)
+    print("🗣️ 사용자 답변:", user_answer)
+    print("🔍 매칭된 키워드:", matched_keywords)
+    print("➡️ followup 생성 여부:", should_generate)
+
+
     if not should_generate:
         return Response({'followup': False, 'matched_keywords': matched_keywords})
 

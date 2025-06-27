@@ -51,6 +51,7 @@ urlpatterns = [
     # ✅ 피드백 리포트 & 꼬리 질문
     path('interview/feedback/generate/', views.generate_feedback_report, name='generate_feedback'),
     path('followup/check/', views.decide_followup_question, name='followup_check'),
+    path('video/get-clips-and-segments/', views.get_clips_and_segments, name='get_clips_and_segments'),
 
     # history 조회
     path('feedback/history/', get_feedback_history, name='feedback_history'),

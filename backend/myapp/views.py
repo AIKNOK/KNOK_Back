@@ -1733,3 +1733,66 @@ def extract_question_clip_segments(request):
         "clips": results
     })
     return JsonResponse({"status": "ok"})
+
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+from django.conf import settings
+import boto3
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def get_clips_and_segments(request):
+    user = request.user
+    email_prefix = user.email.split('@')[0]
+    interview_id = request.data.get("interview_id")
+    if not interview_id:
+        return Response({"error": "interview_id는 필수입니다."}, status=400)
+
+    s3 = boto3.client(
+        "s3",
+        aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
+        aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
+        region_name=settings.AWS_S3_REGION_NAME,
+    )
+
+    clip_prefix = f"clips/{email_prefix}/{interview_id}_"
+    thumb_prefix = f"thumbnails/{email_prefix}/{interview_id}_"
+
+    objects = s3.list_objects_v2(Bucket=settings.AWS_CLIP_VIDEO_BUCKET_NAME, Prefix=f"clips/{email_prefix}/")
+    if 'Contents' not in objects:
+        return Response({"clips": []})
+
+    clip_keys = [
+        obj['Key']
+        for obj in objects['Contents']
+        if obj['Key'].startswith(clip_prefix) and obj['Key'].endswith('.mp4')
+    ]
+
+    thumb_objects = s3.list_objects_v2(Bucket=settings.AWS_CLIP_VIDEO_BUCKET_NAME, Prefix=f"thumbnails/{email_prefix}/")
+    thumb_keys = [
+        obj['Key']
+        for obj in thumb_objects.get('Contents', [])
+        if obj['Key'].startswith(thumb_prefix) and obj['Key'].endswith('.jpg')
+    ]
+
+    result = []
+    for clip_key in clip_keys:
+        seg_id = clip_key.split('/')[-1].replace('.mp4', '')
+        thumb_key = f"thumbnails/{email_prefix}/{interview_id}_{seg_id.replace('seg', 'thumb')}.jpg"
+        clip_url = s3.generate_presigned_url('get_object', Params={
+            'Bucket': settings.AWS_CLIP_VIDEO_BUCKET_NAME, 'Key': clip_key
+        }, ExpiresIn=3600)
+        if thumb_key in thumb_keys:
+            thumb_url = s3.generate_presigned_url('get_object', Params={
+                'Bucket': settings.AWS_CLIP_VIDEO_BUCKET_NAME, 'Key': thumb_key
+            }, ExpiresIn=3600)
+        else:
+            thumb_url = None
+        result.append({
+            "clipUrl": clip_url,
+            "thumbnailUrl": thumb_url,
+            "feedback": ""
+        })
+
+    return Response({"clips": result})

@@ -9,7 +9,7 @@
   "containerDefinitions": [
     {
       "name": "knok-backend-test",
-      "image": "257120632536.dkr.ecr.ap-northeast-2.amazonaws.com/backend-test",
+      "image": "${IMAGE_URI}",
       "essential": true,
       "portMappings": [
         {

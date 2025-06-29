@@ -5,7 +5,7 @@
       "TargetService": {
         "Type": "AWS::ECS::Service",
         "Properties": {
-          "TaskDefinition": "",
+          "TaskDefinition": "__IMAGE_TAG__",
           "LoadBalancerInfo": {
             "ContainerName": "knok-backend-test",
             "ContainerPort": 8000

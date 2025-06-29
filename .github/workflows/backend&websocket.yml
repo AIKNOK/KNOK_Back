@@ -7,13 +7,23 @@ on:
 env:
   AWS_REGION: ap-northeast-2
   AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
-  ECR_WEBSOCKET_REPO: websocket-test
-  WS_SERVICE:         knok-websocket-test
 
-  CLUSTER:            knok-cluster-test
-  SERVICE:            knok-backend-test
-  ECR_REPO:           backend-test
-  IMAGE_TAG:          test-${{ github.sha }}
+  # 백엔드 서비스용
+  CLUSTER:             knok-cluster-test
+  SERVICE:             knok-backend-test
+  ECR_REPO:            backend-test
+
+  # WebSocket 서비스용
+  WS_SERVICE:          knok-websocket-test
+  ECR_WEBSOCKET_REPO:  websocket-test
+
+  # CodeDeploy
+  CODEDEPLOY_APP:      test
+  BACKEND_DG:          knok-backend-test-group
+  WS_DG:               knok-websocket-test-group
+
+  # 태그
+  IMAGE_TAG: test-${{ github.sha }}
 
 jobs:
   deploy:
@@ -30,83 +40,81 @@ jobs:
 
     - uses: aws-actions/amazon-ecr-login@v1
 
-    # 1) 이미지 빌드 & 푸시 -------------------------------------------------
-    - name: Build + push image
-      run: |
-        docker build -t $ECR_REPO -f Dockerfile.backend .
-        docker tag  $ECR_REPO:latest \
-          $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPO:$IMAGE_TAG
-        docker push $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPO:$IMAGE_TAG
     - name: Install tools
       run: sudo apt-get update && sudo apt-get install -y jq
 
-    # ─── 1-B. WebSocket 이미지 (★추가) ───
-    - name: Build & push websocket            # ⭐ 새로 추가
+    ##################################
+    # 1. 백엔드 컨테이너 빌드 & 배포 #
+    ##################################
+    - name: Build & push backend image
       run: |
-        docker build -t $ECR_WEBSOCKET_REPO -f Dockerfile.websocket .
-        docker tag  $ECR_WEBSOCKET_REPO:latest \
-        $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_WEBSOCKET_REPO:$IMAGE_TAG
-        docker push $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_WEBSOCKET_REPO:$IMAGE_TAG
+        docker build -t $ECR_REPO -f Dockerfile.backend .
+        docker tag $ECR_REPO:latest $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPO:$IMAGE_TAG
+        docker push       $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPO:$IMAGE_TAG
 
-    
-      # 2) 태스크 정의 렌더링 & 등록 ------------------------------------------
-    - name: Render task-def JSON
+    - name: Render backend task definition
       run: |
         sed \
-          -e "s|\${AWS_REGION}|${AWS_REGION}|g" \
+          -e "s|\${AWS_REGION}|$AWS_REGION|g" \
           -e "s|\${IMAGE_URI}|$AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPO:$IMAGE_TAG|g" \
           ecs-task-def-backend.json > taskdef.render.json
 
-    - id: register-taskdef
-      uses: aws-actions/amazon-ecs-register-task-definition@v1
+    - name: Deploy backend service
+      uses: aws-actions/amazon-ecs-deploy-task-definition@v1
       with:
+        cluster:         ${{ env.CLUSTER }}
+        service:         ${{ env.SERVICE }}
         task-definition: taskdef.render.json
+        wait-for-service-stability: false
 
-    # 3) AppSpec 파일에 TaskDefinition ARN 주입 -----------------------------
-    - name: Build AppSpec
-      run: |
-        TASK_ARN="${{ steps.register-taskdef.outputs.task-definition-arn }}"
-        sed "s|__TASK_DEF__|$TASK_ARN|g" appspec-backend.json > appspec-final.json
+    - name: Build backend AppSpec
+      run: sed "s|__IMAGE_TAG__|$IMAGE_TAG|g" appspec-backend.json > appspec-final.json
 
-    # 4) CodeDeploy 배포 트리거 -------------------------------------------
-    - name: Create CodeDeploy deployment (backend)
+    - name: CodeDeploy backend
       run: |
         aws deploy create-deployment \
-          --application-name  ${{ env.CODEDEPLOY_APP }} \
-          --deployment-group-name  ${{ env.BACKEND_DG }} \
+          --application-name       $CODEDEPLOY_APP \
+          --deployment-group-name  $BACKEND_DG \
           --deployment-config-name CodeDeployDefault.ECSAllAtOnce \
-          --file-exists-behavior  OVERWRITE \
+          --file-exists-behavior   OVERWRITE \
           --revision revisionType=AppSpecContent,\
-        appSpecContent="{\"content\":\"$(jq -Rs < appspec-final.json)\",\"sha256\":null}" \
-          --description "BG deploy ${{ github.sha }}"
-  # ────────────────────────────────────────────────────────────────
-  # 5) WebSocket – TaskDefinition 등록
-  # ────────────────────────────────────────────────────────────────
-    - name: Render task-def (websocket)
+          appSpecContent="{\"content\":\"$(jq -Rs < appspec-final.json)\",\"sha256\":null}" \
+          --description "BG deploy (backend) ${{ github.sha }}"
+
+    ##################################
+    # 2. WebSocket 컨테이너 배포     #
+    ##################################
+    - name: Build & push websocket image
+      run: |
+        docker build -t $ECR_WEBSOCKET_REPO -f Dockerfile.websocket .
+        docker tag $ECR_WEBSOCKET_REPO:latest $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_WEBSOCKET_REPO:$IMAGE_TAG
+        docker push             $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_WEBSOCKET_REPO:$IMAGE_TAG
+
+    - name: Render websocket task definition
       run: |
         sed \
-          -e "s|\${AWS_REGION}|${AWS_REGION}|g" \
+          -e "s|\${AWS_REGION}|$AWS_REGION|g" \
           -e "s|\${IMAGE_URI}|$AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_WEBSOCKET_REPO:$IMAGE_TAG|g" \
           ecs-task-def-websocket.json > ws-taskdef.render.json
-    
-    - id: register-ws-taskdef
-      uses: aws-actions/amazon-ecs-register-task-definition@v1
+
+    - name: Deploy websocket service
+      uses: aws-actions/amazon-ecs-deploy-task-definition@v1
       with:
+        cluster:         ${{ env.CLUSTER }}
+        service:         ${{ env.WS_SERVICE }}
         task-definition: ws-taskdef.render.json
+        wait-for-service-stability: false
 
-    # 6) WebSocket – AppSpec 동적 생성
-    - name: Build AppSpec (websocket)
-      run: |
-        WS_TASK_ARN="${{ steps.register-ws-taskdef.outputs.task-definition-arn }}"
-        sed "s|__TASK_DEF__|$WS_TASK_ARN|g" appspec-websocket.json > appspec-ws-final.json
+    - name: Build websocket AppSpec
+      run: sed "s|__IMAGE_TAG__|$IMAGE_TAG|g" appspec-websocket.json > appspec-ws-final.json
 
-    # 7) WebSocket – CodeDeploy 배포 트리거
-    - name: Create CodeDeploy deployment (websocket)
+    - name: CodeDeploy websocket
       run: |
         aws deploy create-deployment \
-          --application-name  AppECS-${CLUSTER}-${WS_SERVICE} \
-          --deployment-group-name knok-websocket-test-group \
+          --application-name       $CODEDEPLOY_APP \
+          --deployment-group-name  $WS_DG \
           --deployment-config-name CodeDeployDefault.ECSAllAtOnce \
-          --file-exists-behavior OVERWRITE \
-          --revision revisionType=AppSpecContent,appSpecContent="{\"content\":\"$(jq -Rs < appspec-ws-final.json)\",\"sha256\":null}" \
+          --file-exists-behavior   OVERWRITE \
+          --revision revisionType=AppSpecContent,\
+          appSpecContent="{\"content\":\"$(jq -Rs < appspec-ws-final.json)\",\"sha256\":null}" \
           --description "BG deploy (websocket) ${{ github.sha }}"

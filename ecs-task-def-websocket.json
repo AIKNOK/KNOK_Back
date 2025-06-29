@@ -1,5 +1,5 @@
 {
-  "family": "knok-websocket-pri-task",
+  "family": "knok-websocket-test",
   "taskRoleArn": "arn:aws:iam::257120632536:role/knokTaskRoleWithS3", 
   "executionRoleArn": "arn:aws:iam::257120632536:role/ecsTaskExecutionRole",
   "networkMode": "awsvpc",
@@ -8,8 +8,8 @@
   "memory": "512",
   "containerDefinitions": [
     {
-      "name": "knok-websocket",
-      "image": "257120632536.dkr.ecr.ap-northeast-2.amazonaws.com/knok-websocket:websocket-19994478375d812155b56687497dbfd6bcf01122",
+      "name": "knok-websocket-test",
+      "image": "257120632536.dkr.ecr.ap-northeast-2.amazonaws.com/websocket-test",
       "essential": true,
       "portMappings": [
         {
@@ -28,7 +28,7 @@
       "logConfiguration": {
         "logDriver": "awslogs",
         "options": {
-          "awslogs-group": "/ecs/knok-websocket-pri-task",
+          "awslogs-group": "/ecs/knok-websocket-test",
           "awslogs-region": "ap-northeast-2",
           "awslogs-stream-prefix": "ecs"
         }

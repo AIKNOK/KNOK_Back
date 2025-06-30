@@ -2,49 +2,59 @@ FROM python:3.10-slim AS builder
 
 WORKDIR /app
 
+# ───── requirements ─────
 COPY requirements.backend.txt ./requirements.backend.txt
-COPY requirements.common.txt ./requirements.common.txt
+COPY requirements.common.txt  ./requirements.common.txt
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    gcc g++ make libpq-dev python3-dev libffi-dev libsndfile1 ffmpeg libgl1 git \
- && rm -rf /var/lib/apt/lists/* \
- && pip install --upgrade pip \
- && pip install --no-cache-dir -r requirements.backend.txt
+        gcc g++ make libpq-dev python3-dev libffi-dev libsndfile1 ffmpeg libgl1 git \
+    && rm -rf /var/lib/apt/lists/* \
+    && pip install --upgrade pip \
+    && pip install --no-cache-dir -r requirements.backend.txt
 
+# KeyBERT 모델 미리 캐싱
 ENV HF_HOME=/root/.cache/huggingface
+RUN python3 - <<'PY'
+from keybert import KeyBERT
+KeyBERT('distiluse-base-multilingual-cased-v1')
+PY
 
-RUN python3 -c "\
-from keybert import KeyBERT; \
-KeyBERT('distiluse-base-multilingual-cased-v1')"
 
+
+################################################################
+# 런타임 이미지
+################################################################
 FROM python:3.10-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PYTHONPATH="/app/backend" \
+    PYTHONPATH="/app:/app/backend" \        
     HF_HOME=/root/.cache/huggingface
 
-# 고정 질문 오디오 폴더를 컨테이너에 복사
+# ───── 고정 질문 오디오 ─────
 WORKDIR /app/audio
 COPY audio /app/audio
 
+# ───── 백엔드 코드 ─────
 WORKDIR /app/backend
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    libpq-dev libsndfile1 ffmpeg libgl1 \
- && rm -rf /var/lib/apt/lists/*
+        libpq-dev libsndfile1 ffmpeg libgl1 \
+    && rm -rf /var/lib/apt/lists/*
 
+# site-packages & 실행 파일
 COPY --from=builder /usr/local/lib/python3.10/site-packages /usr/local/lib/python3.10/site-packages
 COPY --from=builder /usr/local/bin /usr/local/bin
-
-# ✅ huggingface 모델 캐시 복사
+# HuggingFace 캐시
 COPY --from=builder /root/.cache/huggingface /root/.cache/huggingface
 
-# 📁 백엔드 앱과 entrypoint 스크립트 복사
+# (2) 공통 유틸 패키지 복사 ── ONLY 이 한 줄 추가
+COPY common /app/common
+
+# entrypoint
 COPY backend /app/backend
 COPY backend/entrypoint.sh /app/backend/entrypoint.sh
 RUN chmod +x /app/backend/entrypoint.sh
 
 EXPOSE 8000
-
 CMD ["./entrypoint.sh"]

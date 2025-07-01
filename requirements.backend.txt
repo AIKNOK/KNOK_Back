@@ -111,3 +111,4 @@ psycopg2-binary==2.9.9
 PyMuPDF>=1.21.1
 django-prometheus==2.4.1
 prometheus_client>=0.17.0
+aws-xray-sdk==2.14.0

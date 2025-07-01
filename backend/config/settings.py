@@ -271,8 +271,6 @@ LOGGING = {
     },
 }
 
-XRAY_RECORDER = xray_recorder
-
-XRAY_RECORDER.configure(
-    service='my-django-app'
+xray_recorder.configure(
+    service='knok-backend-service'
 )

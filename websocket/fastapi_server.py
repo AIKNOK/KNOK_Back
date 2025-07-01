@@ -5,12 +5,15 @@ from datetime import datetime
 from amazon_transcribe.client import TranscribeStreamingClient
 from starlette.websockets import WebSocketDisconnect
 from dotenv import load_dotenv
-from fastapi import FastAPI
+from aws_xray_sdk.core import xray_recorder
+from aws_xray_sdk.ext.fastapi.middleware import XRayMiddleware
 
 import boto3
 import requests
 import json
 
+
+xray_recorder.configure(service='knok-websocket-service')
 
 load_dotenv()
 upload_id_cache = {}
@@ -23,6 +26,7 @@ DJANGO_API_URL = os.getenv("DJANGO_API_URL")
 
 app = FastAPI()
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+app.add_middleware(XRayMiddleware)
 
 @app.websocket("/ws/transcribe")
 async def transcribe_ws(websocket: WebSocket, email: str = Query(...), question_id: str = Query(...), token: str = Query(...)):

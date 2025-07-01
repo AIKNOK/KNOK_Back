@@ -39,8 +39,10 @@ COPY audio /app/audio
 WORKDIR /app/backend
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        libpq-dev libsndfile1 ffmpeg libgl1 \
+    libpq-dev libsndfile1 ffmpeg libgl1 \
+    libjpeg62-turbo libtiff5 zlib1g libopenjp2-7 \
     && rm -rf /var/lib/apt/lists/*
+
 
 # site-packages & 실행 파일
 COPY --from=builder /usr/local/lib/python3.10/site-packages /usr/local/lib/python3.10/site-packages

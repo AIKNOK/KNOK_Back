@@ -24,5 +24,6 @@ from myapp.views import (
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('api/', include('myapp.urls')),  # ← 여기서 'api/'는 선택. 원하는 경로로 변경 가능
+    path('', include('django_prometheus.urls')), # prometheus metric 수집 경로
 ]
 

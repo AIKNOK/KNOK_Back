@@ -14,6 +14,7 @@ from pathlib import Path
 from datetime import timedelta
 from corsheaders.defaults import default_headers
 import os
+from aws_xray_sdk.core import xray_recorder
 
 import logging
 
@@ -50,6 +51,7 @@ INSTALLED_APPS = [
 ]
 
 MIDDLEWARE = [
+    'aws_xray_sdx.ext.django.middleware.XRayMiddleware',
     'corsheaders.middleware.CorsMiddleware',
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
@@ -268,3 +270,9 @@ LOGGING = {
         },
     },
 }
+
+XRAY_RECORDER = xray_recorder
+
+XRAY_RECORDER.configure(
+    service='my-django-app'
+)

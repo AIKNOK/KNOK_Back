@@ -29,6 +29,7 @@ import subprocess
 import os
 import traceback
 import uuid
+import fitz
 
 from django.conf import settings
 from .models import Resume
@@ -1134,11 +1135,6 @@ def save_transcribed_text(request):
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def get_resume_text(request):
-    import PyPDF2
-    import tempfile
-    import boto3
-    import requests
-
     try:
         # ✅ DB에서 이력서 레코드 가져오기
         resume = Resume.objects.get(user=request.user)
@@ -1148,6 +1144,7 @@ def get_resume_text(request):
         # ✅ Presigned URL 생성
         s3 = boto3.client('s3',
                           aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
+                          aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
                           region_name=settings.AWS_S3_REGION_NAME)
 
         url = s3.generate_presigned_url(
@@ -1161,16 +1158,38 @@ def get_resume_text(request):
         with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
             tmp.write(r.content)
             tmp.flush()
+            tmp_path = tmp.name
 
-        with open(tmp.name, 'rb') as f:
-            reader = PyPDF2.PdfReader(f)
-            text = "\n".join(page.extract_text() for page in reader.pages if page.extract_text())
+        print(f"📎 이력서 파일 저장 경로: {tmp_path}")
+        print(f"📂 PDF 크기: {os.path.getsize(tmp_path)} bytes")
+
+        # ✅ 1차: PyPDF2
+        try:
+            with open(tmp_path, 'rb') as f:
+                reader = PyPDF2.PdfReader(f)
+                text = "\n".join(page.extract_text() for page in reader.pages if page.extract_text())
+            if not text.strip():
+                raise ValueError("PyPDF2로 텍스트가 추출되지 않음")
+            print(f"✅ PyPDF2 텍스트 추출 성공 (길이: {len(text)})")
+        except Exception as e:
+            print(f"⚠️ PyPDF2 실패: {e}")
+            print("🔁 PyMuPDF(fitz)로 재시도")
+            try:
+                doc = fitz.open(tmp_path)
+                text = "\n".join(page.get_text() for page in doc)
+                print(f"✅ fitz 추출 성공 (길이: {len(text)})")
+            except Exception as e2:
+                print(f"❌ fitz 또한 실패: {e2}")
+                traceback.print_exc()
+                return Response({'error': 'PDF 텍스트 추출 실패', 'detail': str(e2)}, status=500)
 
         return Response({'resume_text': text})
 
     except Resume.DoesNotExist:
         return Response({'error': '등록된 이력서가 없습니다.'}, status=404)
     except Exception as e:
+        print(f"❌ get_resume_text 최상위 예외: {str(e)}")
+        traceback.print_exc()
         return Response({'error': str(e)}, status=500)
 
 def convert_webm_to_mp4(input_path):

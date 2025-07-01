@@ -119,4 +119,4 @@ uvicorn==0.34.3
 webrtcvad==2.0.10
 websockets==15.0.1
 gunicorn==21.2.0
-
+PyMuPDF>=1.21.1

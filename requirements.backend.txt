@@ -108,3 +108,4 @@ typing_extensions==4.13.2
 tzdata==2025.2
 urllib3==2.4.0
 psycopg2-binary==2.9.9
+PyMuPDF>=1.21.1

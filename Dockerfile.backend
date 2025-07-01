@@ -12,7 +12,7 @@ COPY requirements.common.txt ./requirements.common.txt
 # 시스템 패키지 설치
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc g++ make libpq-dev python3-dev libffi-dev libsndfile1 ffmpeg libgl1 git \
-    libjpeg-dev libtiff5 zlib1g libopenjp2-7 \
+    libjpeg-dev libtiff-dev zlib1g libopenjp2-7 \
     && rm -rf /var/lib/apt/lists/*
 
 # pip 패키지 설치
@@ -44,10 +44,10 @@ COPY audio /app/audio
 
 WORKDIR /app/backend
 
-# 실행에 필요한 시스템 패키지
+# 실행에 필요한 시스템 패키지 설치
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq-dev libsndfile1 ffmpeg libgl1 \
-    libjpeg-dev libtiff5 zlib1g libopenjp2-7 \
+    libjpeg-dev libtiff-dev zlib1g libopenjp2-7 \
     && rm -rf /var/lib/apt/lists/*
 
 # Python 패키지 및 실행 바이너리 복사

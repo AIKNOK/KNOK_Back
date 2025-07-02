@@ -278,7 +278,7 @@ LOGGING = {
 
 xray_recorder.configure(
     service='knok-backend-service',
-    daemon_address='xray-daemon:2000',  # ECS Task 내 xray-daemon 사이드카 주소
+    daemon_address='127.0.0.1:2000',  # ECS Task 내 xray-daemon 사이드카 주소
     sampling=True
 )
 

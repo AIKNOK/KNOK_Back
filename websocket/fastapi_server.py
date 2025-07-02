@@ -1,24 +1,15 @@
 import asyncio, json, wave, os, tempfile, requests
-from fastapi import FastAPI, WebSocket, Query, Request
+from fastapi import FastAPI, WebSocket, Query
 from fastapi.middleware.cors import CORSMiddleware
 from datetime import datetime
 from amazon_transcribe.client import TranscribeStreamingClient
 from starlette.websockets import WebSocketDisconnect
 from dotenv import load_dotenv
-from aws_xray_sdk.core import xray_recorder, patch_all
-from aws_xray_sdk.core.async_context import AsyncContext
-
-from starlette.middleware.base import BaseHTTPMiddleware
 
 import boto3
 import requests
 import json
 
-
-# X-Ray 설정
-xray_recorder.configure(service='knok-websocket-service')
-xray_recorder.context = AsyncContext()
-patch_all() 
 
 load_dotenv()
 upload_id_cache = {}
@@ -29,43 +20,9 @@ AWS_ACCESS_KEY = os.getenv("AWS_ACCESS_KEY_ID")
 AWS_SECRET_KEY = os.getenv("AWS_SECRET_ACCESS_KEY")
 DJANGO_API_URL = os.getenv("DJANGO_API_URL")
 
-# 미들웨어 구현
-class XRayMiddleware(BaseHTTPMiddleware):
-    async def dispatch(self, request: Request, call_next):
-        segment = xray_recorder.begin_segment(name=request.url.path)
-        try:
-            response = await call_next(request)
-            return response
-        finally:
-            xray_recorder.end_segment()
-
 # FastAPI 앱에 적용
 app = FastAPI()
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"], allow_credentials=True)
-app.add_middleware(XRayMiddleware)
-
-@app.websocket("/ws/{upload_id}")
-async def websocket_endpoint(websocket: WebSocket, upload_id: str):
-    await websocket.accept()
-
-    # WebSocket용 segment 시작
-    segment = xray_recorder.begin_segment(name=f"/ws/{upload_id}")
-    try:
-        while True:
-            data = await websocket.receive_bytes()
-
-            # 서브세그먼트로 세부 트레이스
-            subsegment = xray_recorder.begin_subsegment("receive_audio")
-            try:
-                # 데이터 처리
-                await websocket.send_text("ack")
-            finally:
-                xray_recorder.end_subsegment()
-
-    except WebSocketDisconnect:
-        print("Disconnected")
-    finally:
-        xray_recorder.end_segment()
 
 @app.websocket("/ws/transcribe")
 async def transcribe_ws(websocket: WebSocket, email: str = Query(...), question_id: str = Query(...), token: str = Query(...)):

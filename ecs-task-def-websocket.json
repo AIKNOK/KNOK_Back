@@ -22,8 +22,7 @@
         { "name": "AWS_AUDIO_BUCKET_NAME", "value": "live-stt" },
         { "name": "AWS_REGION", "value": "${AWS_REGION}" },
         { "name": "AWS_SECRET_ACCESS_KEY", "value": "${AWS_SECRET_ACCESS_KEY}" },
-        { "name": "DJANGO_API_URL", "value": "https://api.ai-knok.com/api/save_transcribed_text/" },
-        { "name": "AWS_XRAY_DAEMON_ADDRESS", "value": "xray-daemon:2000" }
+        { "name": "DJANGO_API_URL", "value": "https://api.ai-knok.com/api/save_transcribed_text/" }
       ],
 
       "logConfiguration": {
@@ -32,25 +31,6 @@
           "awslogs-group": "/ecs/knok-websocket-pri-task",
           "awslogs-region": "ap-northeast-2",
           "awslogs-stream-prefix": "ecs"
-        }
-      }
-    },
-    {
-      "name": "xray-daemon",
-      "image": "amazon/aws-xray-daemon",
-      "essential": false,
-      "portMappings": [
-        {
-          "containerPort": 2000,
-          "protocol": "udp"
-        }
-      ],
-      "logConfiguration": {
-        "logDriver": "awslogs",
-        "options": {
-          "awslogs-group": "/ecs/knok-xray",
-          "awslogs-region": "ap-northeast-2",
-          "awslogs-stream-prefix": "xray-websocket"
         }
       }
     }

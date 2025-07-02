@@ -55,7 +55,7 @@
     },
     {
       "name": "xray-daemon",
-      "image": "public.ecr.aws/xray/aws-xray-daemon:3.3.15",
+      "image": "257120632536.dkr.ecr.ap-northeast-2.amazonaws.com/knok-xray-daemon:3.3.15",
       "essential": false,
       "portMappings": [
         {

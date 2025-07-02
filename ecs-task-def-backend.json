@@ -40,7 +40,8 @@
         { "name": "CLOUDFRONT_KEY_PAIR_ID", "value": "K4N22H8XT57MX"},
         { "name": "CLOUDFRONT_DOMAIN", "value": "https://d1wycbn3ncvxc0.cloudfront.net"},
         { "name": "CLOUDFRONT_SECRET_NAME", "value": "knok/cloudfront/private-key"},
-        { "name": "AWS_XRAY_DAEMON_ADDRESS", "value": "xray-daemon:2000" }
+        { "name": "AWS_XRAY_DAEMON_ADDRESS", "value": "xray-daemon:2000" },
+        { "name": "AWS_SIMPLE_QUEUE_SERVICE", "value": "https://sqs.ap-northeast-2.amazonaws.com/257120632536/tts-request-queue.fifo" }
       ],
 
       "logConfiguration": {

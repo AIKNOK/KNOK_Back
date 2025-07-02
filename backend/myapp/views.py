@@ -1020,17 +1020,13 @@ def decide_followup_question(request):
             )
 
             followup_bucket = settings.AWS_FOLLOWUP_QUESTION_BUCKET_NAME
-            s3_key = f"{interview_id}/{followup_question_number}.json"
-            question_data = {
-                "question_number": followup_question_number,
-                "question": question
-            }
+            s3_key = f"{interview_id}/{followup_question_number}.txt"
 
             s3_client.put_object(
                 Bucket=followup_bucket,
                 Key=s3_key,
-                Body=json.dumps(question_data).encode('utf-8'),
-                ContentType='application/json'
+                Body=question.encode('utf-8'),
+                ContentType='text/plain'
             )
         except Exception as e:
             print("❌ S3 저장 중 오류:", str(e))

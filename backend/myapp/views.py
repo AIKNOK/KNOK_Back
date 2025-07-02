@@ -948,126 +948,126 @@ def receive_posture_count(request):
 @permission_classes([IsAuthenticated])
 def decide_followup_question(request):
     print("✅ [decide_followup_question] API 요청 수신됨")
-    print("📄 resume_text 길이:", len(resume_text) if resume_text else "None")
-    print("🗣️ user_answer 길이:", len(user_answer) if user_answer else "None")
-
-    auth_header = request.headers.get('Authorization', '')
-    if not auth_header.startswith('Bearer '):
-        return Response({'error': 'Authorization 헤더가 없습니다.'}, status=401)
-    
-    token = auth_header.replace('Bearer ', '', 1).strip()
-    headers = {
-        "Authorization": f"Bearer {token}"
-    }
-    resume_text = request.data.get('resume_text')
-    user_answer = request.data.get('user_answer')
-    base_question_number = request.data.get('base_question_number')
-    existing_question_numbers = request.data.get('existing_question_numbers', [])
-    interview_id = request.data.get('interview_id')
-
-    # 필수 값 검증
-    if not all([resume_text, user_answer, base_question_number, interview_id]):
-        return Response({'error': 'resume_text, user_answer, base_question_number, interview_id는 필수입니다.'}, status=400)
-
-    print("📄 resume_text 샘플:", resume_text[:500])
-    print("📄 resume_text 길이:", len(resume_text))
-
-    # 1. 키워드 추출 및 follow-up 필요 여부 판단
-    keywords = extract_resume_keywords(resume_text)
-    should_generate = should_generate_followup(user_answer, keywords)
-    matched_keywords = [kw for kw in keywords if kw in user_answer]
-
-    print("✅ 꼬리질문 디버깅 시작")
-    print("📄 이력서 키워드:", keywords)
-    print("🗣️ 사용자 답변:", user_answer)
-    print("🔍 매칭된 키워드:", matched_keywords)
-    print("➡️ followup 생성 여부:", should_generate)
-
-
-    if not should_generate:
-        return Response({'followup': False, 'matched_keywords': matched_keywords})
-
-    # 2. Claude 프롬프트 구성 및 질문 생성
-    prompt = f"""
-    사용자가 자기소개서에서 다음과 같은 키워드를 강조했습니다: {', '.join(keywords)}.
-    이에 대해 다음과 같은 답변을 했습니다: "{user_answer}".
-    특히 다음 키워드가 매칭되었습니다: {', '.join(matched_keywords)}.
-    이 키워드를 바탕으로 follow-up 질문 1개만 자연스럽게 생성해주세요.
-    질문은 면접관이 묻는 말투로 해주세요.
-    """
-    try:
-        question = get_claude_followup_question(prompt).strip()
-    except Exception as e:
-        return Response({'error': 'Claude 호출 실패', 'detail': str(e)}, status=500)
-
-    # 3. 새로운 follow-up 질문 번호 지정
-    base_str = str(base_question_number)
-
-    suffix_numbers = [
-        int(q.split('-')[1])
-        for q in existing_question_numbers
-        if q.startswith(base_str + '-')
-    ]
-    next_suffix = max(suffix_numbers, default=0) + 1
-    followup_question_number = f"{base_str}-{next_suffix}"
-
-    # 4. S3에 질문 저장
-    s3_client = boto3.client(
-        "s3",
-        aws_access_key_id=os.getenv("AWS_ACCESS_KEY_ID"),
-        aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY"),
-    )
-
-    followup_bucket = settings.AWS_FOLLOWUP_QUESTION_BUCKET_NAME
-    s3_key = f"{interview_id}/{followup_question_number}.json"
-
-    question_data = {
-        "question_number": followup_question_number,
-        "question": question
-    }
 
     try:
-        s3_client.put_object(
-            Bucket=followup_bucket,
-            Key=s3_key,
-            Body=json.dumps(question_data).encode('utf-8'),
-            ContentType='application/json'
-        )
+        auth_header = request.headers.get('Authorization', '')
+        if not auth_header.startswith('Bearer '):
+            return Response({'error': 'Authorization 헤더가 없습니다.'}, status=401)
+        token = auth_header.replace('Bearer ', '', 1).strip()
+        headers = {
+            "Authorization": f"Bearer {token}"
+        }
+
+        resume_text = request.data.get('resume_text')
+        user_answer = request.data.get('user_answer')
+        base_question_number = request.data.get('base_question_number')
+        existing_question_numbers = request.data.get('existing_question_numbers', [])
+        interview_id = request.data.get('interview_id')
+
+        if not all([resume_text, user_answer, base_question_number, interview_id]):
+            return Response({'error': 'resume_text, user_answer, base_question_number, interview_id는 필수입니다.'}, status=400)
+
+        print("📄 resume_text 길이:", len(resume_text))
+        print("🗣️ user_answer 길이:", len(user_answer))
+
+        # 키워드 추출 및 꼬리질문 필요 여부 판단
+        try:
+            keywords = extract_resume_keywords(resume_text)
+            should_generate = should_generate_followup(user_answer, keywords)
+            matched_keywords = [kw for kw in keywords if kw in user_answer]
+        except Exception as e:
+            print("❌ 키워드 추출 또는 판단 중 오류:", str(e))
+            return Response({'error': '키워드 처리 실패', 'detail': str(e)}, status=500)
+
+        print("✅ 꼬리질문 디버깅 시작")
+        print("📄 이력서 키워드:", keywords)
+        print("🗣️ 사용자 답변:", user_answer)
+        print("🔍 매칭된 키워드:", matched_keywords)
+        print("➡️ followup 생성 여부:", should_generate)
+
+        if not should_generate:
+            return Response({'followup': False, 'matched_keywords': matched_keywords})
+
+        # Claude 호출
+        prompt = f"""
+        사용자가 자기소개서에서 다음과 같은 키워드를 강조했습니다: {', '.join(keywords)}.
+        이에 대해 다음과 같은 답변을 했습니다: "{user_answer}".
+        특히 다음 키워드가 매칭되었습니다: {', '.join(matched_keywords)}.
+        이 키워드를 바탕으로 follow-up 질문 1개만 자연스럽게 생성해주세요.
+        질문은 면접관이 묻는 말투로 해주세요.
+        """
+        try:
+            question = get_claude_followup_question(prompt).strip()
+        except Exception as e:
+            print("❌ Claude 호출 실패:", str(e))
+            return Response({'error': 'Claude 호출 실패', 'detail': str(e)}, status=500)
+
+        # 질문 번호 구성
+        base_str = str(base_question_number)
+        suffix_numbers = [
+            int(q.split('-')[1]) for q in existing_question_numbers
+            if q.startswith(base_str + '-') and '-' in q
+        ]
+        next_suffix = max(suffix_numbers, default=0) + 1
+        followup_question_number = f"{base_str}-{next_suffix}"
+
+        # S3 저장
+        try:
+            s3_client = boto3.client(
+                "s3",
+                aws_access_key_id=os.getenv("AWS_ACCESS_KEY_ID"),
+                aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY"),
+            )
+
+            followup_bucket = settings.AWS_FOLLOWUP_QUESTION_BUCKET_NAME
+            s3_key = f"{interview_id}/{followup_question_number}.json"
+            question_data = {
+                "question_number": followup_question_number,
+                "question": question
+            }
+
+            s3_client.put_object(
+                Bucket=followup_bucket,
+                Key=s3_key,
+                Body=json.dumps(question_data).encode('utf-8'),
+                ContentType='application/json'
+            )
+        except Exception as e:
+            print("❌ S3 저장 중 오류:", str(e))
+            return Response({'error': 'S3 저장 실패', 'detail': str(e)}, status=500)
+
+        # SQS 전송
+        try:
+            sqs = boto3.client('sqs', region_name='ap-northeast-2')
+            QUEUE_URL = settings.AWS_SIMPLE_QUEUE_SERVICE
+            email = request.user.email.split('@')[0]
+
+            message = {
+                "question_number": followup_question_number,
+                "text": question,
+                "headers": headers
+            }
+
+            response = sqs.send_message(
+                QueueUrl=QUEUE_URL,
+                MessageBody=json.dumps(message),
+                MessageGroupId=email,
+                MessageDeduplicationId=f"{email}-{int(time.time() * 1000)}"
+            )
+            return Response({
+                "message": "SQS에 요청 성공",
+                "sqs_message_id": response['MessageId']
+            }, status=200)
+        except Exception as e:
+            print("❌ SQS 전송 중 오류:", str(e))
+            return Response({
+                "error": "SQS 전송 중 예외 발생",
+                "detail": str(e)
+            }, status=500)
+
     except Exception as e:
-        return Response({'error': 'S3 저장 실패', 'detail': str(e)}, status=500)
-
-
-    sqs = boto3.client('sqs', region_name='ap-northeast-2')  # region은 실제 리전에 맞게 수정
-
-    # SQS URL 정의
-    QUEUE_URL = settings.AWS_SIMPLE_QUEUE_SERVICE
-
-    email = request.user.email.split('@')[0]
-
-    # SQS 메시지 구성 및 전달
-    message = {
-        "question_number": followup_question_number,
-        "text": question,
-        "headers" : headers
-    }
-
-    try:
-        response = sqs.send_message(
-            QueueUrl=QUEUE_URL,
-            MessageBody=json.dumps(message),
-            MessageGroupId=email,
-            MessageDeduplicationId=f"{email}-{int(time.time() * 1000)}"
-        )
-        return Response({
-            "message": "SQS에 요청 성공",
-            "sqs_message_id": response['MessageId']
-        }, status=200)
-
-    except Exception as e:
-        return Response({
-            "error": "SQS 전송 중 예외 발생",
-            "detail": str(e)
-        }, status=500)
+        print("❌ [알 수 없는 오류]", str(e))
+        return Response({'error': '내부 서버 오류 발생', 'detail': str(e)}, status=500)
 
 
 

@@ -39,7 +39,8 @@
         { "name": "DJANGO_SETTINGS_MODULE", "value": "config.settings" },
         { "name": "CLOUDFRONT_KEY_PAIR_ID", "value": "K4N22H8XT57MX"},
         { "name": "CLOUDFRONT_DOMAIN", "value": "https://d1wycbn3ncvxc0.cloudfront.net"},
-        { "name": "CLOUDFRONT_SECRET_NAME", "value": "knok/cloudfront/private-key"}
+        { "name": "CLOUDFRONT_SECRET_NAME", "value": "knok/cloudfront/private-key"},
+        { "name": "AWS_XRAY_DAEMON_ADDRESS", "value": "xray-daemon:2000" }
       ],
 
       "logConfiguration": {
@@ -53,7 +54,7 @@
     },
     {
       "name": "xray-daemon",
-      "image": "amazon/aws-xray-daemon",
+      "image": "public.ecr.aws/xray/aws-xray-daemon:latest",
       "essential": false,
       "portMappings": [
         {
@@ -66,7 +67,7 @@
         "options": {
           "awslogs-group": "/ecs/knok-xray",
           "awslogs-region": "ap-northeast-2",
-          "awslogs-stream-prefix": "xray"
+          "awslogs-stream-prefix": "xray-backend"
         }
       }
     }

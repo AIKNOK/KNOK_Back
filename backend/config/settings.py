@@ -15,6 +15,7 @@ from datetime import timedelta
 from corsheaders.defaults import default_headers
 import os
 from aws_xray_sdk.core import xray_recorder
+from aws_xray_sdk.core import patch_all
 
 import logging
 
@@ -275,5 +276,9 @@ LOGGING = {
 }
 
 xray_recorder.configure(
-    service='knok-backend-service'
+    service='knok-backend-service',
+    daemon_address='xray-daemon:2000',  # ECS Task 내 xray-daemon 사이드카 주소
+    sampling=True
 )
+
+patch_all() 

@@ -489,7 +489,7 @@ def generate_resume_questions(request):
         "Authorization": f"Bearer {token}"
     }
     sqs = boto3.client('sqs', region_name='ap-northeast-2')  # region은 실제 리전에 맞게 수정
-    QUEUE_URL = 'https://sqs.ap-northeast-2.amazonaws.com/257120632536/tts-request-queue.fifo'
+    QUEUE_URL = settings.AWS_SIMPLE_QUEUE_SERVICE
 
     email = request.user.email.split('@')[0]
     

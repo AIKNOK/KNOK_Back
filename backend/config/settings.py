@@ -15,6 +15,7 @@ from datetime import timedelta
 from corsheaders.defaults import default_headers
 import os
 from aws_xray_sdk.core import xray_recorder
+from aws_xray_sdk.core import patch_all
 
 import logging
 
@@ -172,6 +173,7 @@ AWS_S3_REGION_NAME = os.environ.get('AWS_S3_REGION_NAME')
 AWS_S3_CUSTOM_DOMAIN = "ai-knok.com"
 AWS_TTS_BUCKET_NAME = os.environ.get("TTS_BUCKET_NAME")
 AWS_FOLLOWUP_QUESTION_BUCKET_NAME = os.environ.get("AWS_FOLLOWUP_QUESTION_BUCKET_NAME")
+AWS_SIMPLE_QUEUE_SERVICE = os.environ.get("AWS_SIMPLE_QUEUE_SERVICE")
 
 try:
     print("✅ [settings.py] 환경변수 로드 완료")
@@ -275,5 +277,9 @@ LOGGING = {
 }
 
 xray_recorder.configure(
-    service='knok-backend-service'
+    service='knok-backend-service',
+    daemon_address='xray-daemon:2000',  # ECS Task 내 xray-daemon 사이드카 주소
+    sampling=True
 )
+
+patch_all() 

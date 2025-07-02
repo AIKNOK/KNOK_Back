@@ -23,7 +23,7 @@
         { "name": "AWS_REGION", "value": "${AWS_REGION}" },
         { "name": "AWS_SECRET_ACCESS_KEY", "value": "${AWS_SECRET_ACCESS_KEY}" },
         { "name": "DJANGO_API_URL", "value": "https://api.ai-knok.com/api/save_transcribed_text/" },
-        { "name": "AWS_XRAY_DAEMON_ADDRESS", "value": "127.0.0.1:2000" }
+        { "name": "AWS_XRAY_DAEMON_ADDRESS", "value": "xray-daemon:2000" }
       ],
 
       "logConfiguration": {

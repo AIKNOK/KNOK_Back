@@ -29,7 +29,7 @@
       "logConfiguration": {
         "logDriver": "awslogs",
         "options": {
-          "awslogs-group": "public.ecr.aws/xray/aws-xray-daemon:latest",
+          "awslogs-group": "/ecs/knok-websocket-pri-task",
           "awslogs-region": "ap-northeast-2",
           "awslogs-stream-prefix": "ecs"
         }

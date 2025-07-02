@@ -55,7 +55,7 @@
     },
     {
       "name": "xray-daemon",
-      "image": "public.ecr.aws/xray/aws-xray-daemon:latest",
+      "image": "/ecs/knok-websocket-pri-task",
       "essential": false,
       "portMappings": [
         {

@@ -5,7 +5,7 @@ from datetime import datetime
 from amazon_transcribe.client import TranscribeStreamingClient
 from starlette.websockets import WebSocketDisconnect
 from dotenv import load_dotenv
-from aws_xray_sdk.core import xray_recorder
+from aws_xray_sdk.core import xray_recorder, patch_all
 from aws_xray_sdk.ext.fastapi.middleware import XRayMiddleware
 
 import boto3
@@ -13,7 +13,12 @@ import requests
 import json
 
 
-xray_recorder.configure(service='knok-websocket-service')
+# X-Ray 설정
+xray_recorder.configure(
+    service='knok-websocket-service',
+    daemon_address='xray-daemon:2000'
+)
+patch_all() 
 
 load_dotenv()
 upload_id_cache = {}

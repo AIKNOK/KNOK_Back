@@ -31,7 +31,7 @@ import os
 import traceback
 import uuid
 import fitz
-import logging
+import time, botocore
 
 from django.conf import settings
 from .models import Resume
@@ -1078,15 +1078,15 @@ def decide_followup_question(request):
                     MessageGroupId=email,
                     MessageDeduplicationId=f"{email}-{int(time.time() * 1000)}"
                 )
-                key = f"{email_prefix}/{followup_question_number}.wav"
-                audio_url = presigned(settings.AWS_TTS_BUCKET_NAME, key)
+                key    = f"{email_prefix}/{followup_question_number}.wav"
+                bucket = settings.AWS_TTS_BUCKET_NAME
 
                 max_wait = 10 
                 waited   = 0
                 while waited < max_wait:
                     try:
-                        s3_client.head_object(Bucket=bucket, Key=key)   # 404면 아직 없음
-                        break                                          # 200이면 바로 탈출
+                       s3_client.head_object(Bucket=bucket, Key=key)
+                       break                       # 파일이 생겼다!                             # 200이면 바로 탈출
                     except botocore.exceptions.ClientError as e:
                         if e.response["Error"]["Code"] != "404":
                             raise                                      # 404 이외 오류는 그대로 에러

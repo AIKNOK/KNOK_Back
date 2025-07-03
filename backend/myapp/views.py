@@ -951,6 +951,21 @@ def receive_posture_count(request):
     logger.info("[백엔드 수신] 자세 count: %s", count)
     return Response({"message": "count 수신 완료", "count": count})
 
+# presigned URL 
+def presigned(bucket, key, exp=3600):
+    """S3 presigned url 생성"""
+    s3 = boto3.client(
+        's3',
+        aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
+        aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
+        region_name=settings.AWS_S3_REGION_NAME,
+    )
+    return s3.generate_presigned_url(
+        'get_object',
+        Params={'Bucket': bucket, 'Key': key},
+        ExpiresIn=exp,
+    )
+
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def decide_followup_question(request):
@@ -994,7 +1009,10 @@ def decide_followup_question(request):
             logger.debug("➡️ followup 생성 여부: %s", should_generate)
 
             if not should_generate:
-                return Response({'followup': False, 'matched_keywords': matched_keywords})
+                return Response({
+                    'followup_generated': False,
+                    'matched_keywords': matched_keywords
+                })
 
             # Claude 호출
             prompt = f"""
@@ -1028,7 +1046,8 @@ def decide_followup_question(request):
                 )
 
                 followup_bucket = settings.AWS_FOLLOWUP_QUESTION_BUCKET_NAME
-                s3_key = f"{interview_id}/{followup_question_number}.txt"
+                email_prefix = request.user.email.split('@')[0] 
+                s3_key = f"{email_prefix}/{followup_question_number}.txt"
 
                 s3_client.put_object(
                     Bucket=followup_bucket,
@@ -1059,14 +1078,32 @@ def decide_followup_question(request):
                     MessageGroupId=email,
                     MessageDeduplicationId=f"{email}-{int(time.time() * 1000)}"
                 )
+                key = f"{email_prefix}/{followup_question_number}.wav"
+                audio_url = presigned(settings.AWS_TTS_BUCKET_NAME, key)
+
+                max_wait = 10 
+                waited   = 0
+                while waited < max_wait:
+                    try:
+                        s3_client.head_object(Bucket=bucket, Key=key)   # 404면 아직 없음
+                        break                                          # 200이면 바로 탈출
+                    except botocore.exceptions.ClientError as e:
+                        if e.response["Error"]["Code"] != "404":
+                            raise                                      # 404 이외 오류는 그대로 에러
+                    time.sleep(1)
+                    waited += 1
+
+                # ❷ 파일이 있으면 URL 생성, 아니면 None
+                audio_url = presigned(bucket, key) if waited < max_wait else None
+
                 return Response({
-                    'followup': True,
-                    'question': question,
-                    'question_number': followup_question_number,
-                    'matched_keywords': matched_keywords,
-                    "message": "SQS에 요청 성공",
-                    "sqs_message_id": response['MessageId']
-                }, status=200)
+                    "followup_generated": True,
+                    "question": question,
+                    "question_number": followup_question_number,
+                    "audio_url": audio_url,      # ← presigned 링크
+                    "matched_keywords": matched_keywords,
+                })
+
             except Exception as e:
                 logger.error("❌ SQS 전송 중 오류: %s", str(e), exc_info=True)
                 return Response({
@@ -1260,7 +1297,9 @@ def get_all_questions_view(request):
         for obj in response.get('Contents', []):
             key = obj['Key']
             if key.endswith('.txt'):
-                question_number = Path(key).stem.replace("질문", "")
+                stem = Path(key).stem  # e.g. 'questions2-1'
+                stem = re.sub(r'^questions?', '', stem) # ✅ 'questions' or 'question' 제거
+                question_number = stem  # 결과: '2-1'
                 content = s3.get_object(Bucket=bucket_name, Key=key)['Body'].read().decode('utf-8')
                 result[question_number] = content.strip()
         return result
@@ -1269,12 +1308,7 @@ def get_all_questions_view(request):
     followup_questions = fetch_questions('knok-followup-questions')
 
     merged = {**base_questions, **followup_questions}
-
-    def safe_key(k):
-        parts = k.split('-')
-        return [(0, int(p)) if p.isdigit() else (1, p) for p in parts]
     
-
     def safe_key(k):
         parts = k.split('-')
         return [(0, int(p)) if p.isdigit() else (1, p) for p in parts]

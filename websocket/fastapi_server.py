@@ -24,6 +24,8 @@ DJANGO_API_URL = os.getenv("DJANGO_API_URL")
 app = FastAPI()
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"], allow_credentials=True)
 
+connections: dict[str, WebSocket] = {}
+
 @app.websocket("/ws/transcribe")
 async def transcribe_ws(websocket: WebSocket, email: str = Query(...), question_id: str = Query(...), token: str = Query(...)):
     await websocket.accept()
@@ -322,6 +324,44 @@ async def refine_transcript_with_claude(transcript_text: str) -> str:
     except Exception as e:
         print("❌ Claude (Bedrock) 호출 실패:", e)
         return transcript_text
+
+@app.websocket("/ws/questions")
+async def question_ws(websocket: WebSocket, user_email: str = Query(...)):
+    await websocket.accept()
+    connections[user_email] = websocket
+    print(f"Question WebSocket connected for {user_email}")
+    try:
+        while True:
+            # Keep the connection alive, or handle specific control messages
+            await websocket.receive_text() 
+    except WebSocketDisconnect:
+        print(f"Question WebSocket disconnected for {user_email}")
+        del connections[user_email]
+    except Exception as e:
+        print(f"Error in question WebSocket for {user_email}: {e}")
+
+@app.post("/internal/send-question")
+async def send_question_to_frontend(data: dict):
+    user_email = data.get("user_email")
+    question = data.get("question")
+    question_number = data.get("question_number")
+
+    if user_email in connections:
+        websocket = connections[user_email]
+        try:
+            await websocket.send_json({
+                "type": "new_question",
+                "question": question,
+                "question_number": question_number
+            })
+            print(f"Sent question to {user_email} via WebSocket: {question_number}")
+            return {"status": "success"}
+        except Exception as e:
+            print(f"Failed to send question to {user_email}: {e}")
+            return {"status": "error", "message": str(e)}
+    else:
+        print(f"No active WebSocket connection for {user_email}")
+        return {"status": "error", "message": "User not connected"}
 
 @app.get("/api/health")
 async def health_check():

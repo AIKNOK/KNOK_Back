@@ -174,6 +174,7 @@ AWS_S3_CUSTOM_DOMAIN = "ai-knok.com"
 AWS_TTS_BUCKET_NAME = os.environ.get("TTS_BUCKET_NAME")
 AWS_FOLLOWUP_QUESTION_BUCKET_NAME = os.environ.get("AWS_FOLLOWUP_QUESTION_BUCKET_NAME")
 AWS_SIMPLE_QUEUE_SERVICE = os.environ.get("AWS_SIMPLE_QUEUE_SERVICE")
+FASTAPI_WEBSOCKET_URL = os.environ.get("FASTAPI_WEBSOCKET_URL")
 
 try:
     print("✅ [settings.py] 환경변수 로드 완료")

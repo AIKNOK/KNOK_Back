@@ -1037,6 +1037,7 @@ def decide_followup_question(request):
             except Exception as e:
                 print("❌ S3 저장 중 오류:", str(e))
                 return Response({'error': 'S3 저장 실패', 'detail': str(e)}, status=500)
+            
 
             # SQS 전송
             try:
@@ -1057,6 +1058,10 @@ def decide_followup_question(request):
                     MessageDeduplicationId=f"{email}-{int(time.time() * 1000)}"
                 )
                 return Response({
+                    'followup': True,
+                    'question': question,
+                    'question_number': followup_question_number,
+                    'matched_keywords': matched_keywords,
                     "message": "SQS에 요청 성공",
                     "sqs_message_id": response['MessageId']
                 }, status=200)

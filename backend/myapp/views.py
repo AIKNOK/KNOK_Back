@@ -539,6 +539,7 @@ def generate_resume_questions(request):
         if not all_audio_ready:
             return Response({"error": "모든 질문 오디오 파일이 준비되지 않았습니다."}, status=500)
 
+
         # SQS 전송 로직 (기존 유지)
         auth_header = request.headers.get('Authorization', '')
         if not auth_header.startswith('Bearer '):
@@ -1108,6 +1109,7 @@ def decide_followup_question(request):
                 )
                 logger.info("✅ SQS 메시지 전송 성공 (꼬리질문 TTS 트리거)")
             except Exception as e:
+
                 logger.error("❌ SQS 전송 중 오류 (꼬리질문 TTS): %s", str(e), exc_info=True)
                 return Response({"error": "SQS 전송 중 예외 발생", "detail": str(e)}, status=500)
 
@@ -1126,6 +1128,7 @@ def decide_followup_question(request):
                 'matched_keywords': matched_keywords,
                 "message": "꼬리 질문 및 TTS 준비 완료"
             }, status=200)
+
 
         except Exception as e:
             logger.error("❌ [알 수 없는 오류] %s", str(e), exc_info=True)

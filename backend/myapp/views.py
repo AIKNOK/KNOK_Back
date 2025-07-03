@@ -365,7 +365,7 @@ def generate_resume_questions(request):
         - 질문 앞에 **숫자, Q1, - , : ,등의 접두어는 절대로 붙이지 마세요.**
         - **KOREAN ELECTRONICS** 같은 번역된 표현은 사용하지 마세요. 반드시 이력서에 있는 **원어 그대로 사용**하세요.
         - 모든 질문은 **대문자로 시작**하고, **완전한 자연어 문장**이어야 합니다.
-        - '귀하'라는 표현 대신 **항상 ‘본인’**을 사용하세요. 이름이 있다면 이름을 써도 됩니다.
+        - '귀하'라는 표현 대신 **항상 ‘본인'**을 사용하세요. 이름이 있다면 이름을 써도 됩니다.
         - 출력은 반드시 줄바꿈으로 구분된 질문 3개만 포함해야 하며, 다른 말은 절대로 출력하지 마세요.
 
         [예시 출력 형식]
@@ -424,7 +424,7 @@ def generate_resume_questions(request):
         - 질문 앞에 **숫자, Q1, - 등의 접두어는 절대로 붙이지 마세요.**
         - **KOREAN ELECTRONICS** 같은 번역된 표현은 사용하지 마세요. 반드시 이력서에 있는 **원어 그대로 사용**하세요.
         - 모든 질문은 **대문자로 시작**하고, **완전한 자연어 문장**이어야 합니다.
-        - '귀하'라는 표현 대신 **항상 ‘본인’**을 사용하세요. 이름이 있다면 이름을 써도 됩니다.
+        - '귀하'라는 표현 대신 **항상 ‘본인'**을 사용하세요. 이름이 있다면 이름을 써도 됩니다.
         - 출력은 반드시 줄바꿈으로 구분된 질문 3개만 포함해야 하며, 다른 말은 절대로 출력하지 마세요.
 
         [나쁜 예시] — 이런 출력은 실패입니다.
@@ -462,6 +462,7 @@ def generate_resume_questions(request):
         final_questions =  fixed_questions_1 + verified_questions[:3] + fixed_questions_5
         logger.info("📦 최종 질문 (고정 + 검증된 질문): %s", final_questions)
 
+        # S3에 질문 저장 (기존 로직 유지)
         for idx, question in enumerate(final_questions, start=1):
             filename = f"{email_prefix}/questions{idx}.txt"
             try:
@@ -474,6 +475,7 @@ def generate_resume_questions(request):
             except Exception as e:
                 logger.error("S3에 질문 업로드 실패 (%s): %s", filename, e, exc_info=True)
 
+        # 고정 질문 오디오 업로드 (기존 로직 유지)
         FIXED_AUDIO_FILES = {
         1: "/app/audio/questions1.wav",
         5: "/app/audio/questions5.wav"
@@ -490,6 +492,54 @@ def generate_resume_questions(request):
             except Exception as e:
                 logger.error("질문 %d번 wav 업로드 실패: %s", idx, e, exc_info=True)
 
+        # WebSocket 서버로 질문 전송
+        fastapi_url = settings.FASTAPI_WEBSOCKET_URL
+        user_full_email = request.user.email
+        for idx, question_text in enumerate(final_questions, start=1):
+            question_num_str = str(idx)
+            # 실제 질문 번호가 '1', '2', '3', '4', '5' 가 되도록 조정
+            if idx > 1 and idx < len(final_questions): # 고정 질문 1과 5 사이의 질문들
+                question_num_str = str(idx - 1)
+            elif idx == len(final_questions): # 마지막 고정 질문 (5)
+                question_num_str = '5'
+
+            payload = {
+                "user_email": user_full_email,
+                "question": question_text,
+                "question_number": question_num_str
+            }
+            try:
+                send_response = requests.post(f"{fastapi_url}/internal/send-question", json=payload)
+                if send_response.status_code == 200: # 200 OK일 때만 성공 로그
+                    logger.info("✅ 질문 %s WebSocket 전송 성공: %s", question_num_str, question_text[:50])
+                else:
+                    logger.error("❌ 질문 %s WebSocket 전송 실패 (상태코드: %s): %s",
+                                 question_num_str, send_response.status_code, send_response.text)
+            except requests.exceptions.RequestException as req_e:
+                logger.error("❌ 질문 %s WebSocket 전송 중 예외 발생: %s", question_num_str, req_e, exc_info=True)
+
+        # SQS 전송 로직 유지 (FastAPI로 질문 전송 후에도 기존 SQS 흐름이 필요하다면 유지)
+        # Removed WebSocket server communication here as per new requirements
+
+        # TTS 오디오 파일이 S3에 업로드될 때까지 대기
+        all_audio_ready = True
+        for idx, question_text in enumerate(final_questions, start=1):
+            email = request.user.email.split('@')[0]
+            s3_audio_key = f"{email}/questions{idx}.wav" # 예상되는 S3 오디오 파일 경로
+            bucket_tts = settings.AWS_TTS_BUCKET_NAME
+
+            # 고정 질문 (1번, 5번)의 경우 이미 views.py에서 직접 S3에 업로드했으므로 바로 확인 가능
+            # 그 외 동적으로 생성된 질문은 SQS를 통해 TTS 서비스가 S3에 업로드할 것임
+            # 따라서 모든 오디오 파일에 대해 존재 여부를 확인해야 함
+            if not wait_for_s3_file(bucket_tts, s3_audio_key):
+                logger.error("❌ 질문 %s 오디오 파일 S3에 없음: %s", idx, s3_audio_key)
+                all_audio_ready = False
+                break
+        
+        if not all_audio_ready:
+            return Response({"error": "모든 질문 오디오 파일이 준비되지 않았습니다."}, status=500)
+
+        # SQS 전송 로직 (기존 유지)
         auth_header = request.headers.get('Authorization', '')
         if not auth_header.startswith('Bearer '):
             return Response({'error': 'Authorization 헤더가 없습니다.'}, status=401)
@@ -525,10 +575,6 @@ def generate_resume_questions(request):
                 "error": "SQS 전송 중 예외 발생",
                 "detail": str(e)
             }, status=500)
-
-
-# Claude 3 호출 함수 추가
-
 
 
 def get_claude_feedback(prompt: str) -> str:
@@ -1040,39 +1086,46 @@ def decide_followup_question(request):
                 logger.error("❌ S3 저장 중 오류: %s", str(e), exc_info=True)
                 return Response({'error': 'S3 저장 실패', 'detail': str(e)}, status=500)
             
+            # Removed WebSocket server communication here as per new requirements
 
-            # SQS 전송
+            # SQS 전송 로직 유지 (기존 SQS 흐름이 필요하다면 유지)
+            # SQS 메시지 구성 및 전송 (TTS 서비스 트리거)
+            sqs = boto3.client('sqs', region_name='ap-northeast-2')
+            QUEUE_URL = settings.AWS_SIMPLE_QUEUE_SERVICE
+            email_prefix = request.user.email.split('@')[0]
+
+            message = {
+                "question_number": followup_question_number,
+                "text": question,
+                "headers": headers
+            }
             try:
-                sqs = boto3.client('sqs', region_name='ap-northeast-2')
-                QUEUE_URL = settings.AWS_SIMPLE_QUEUE_SERVICE
-                email = request.user.email.split('@')[0]
-
-                message = {
-                    "question_number": followup_question_number,
-                    "text": question,
-                    "headers": headers
-                }
-
-                response = sqs.send_message(
+                sqs.send_message(
                     QueueUrl=QUEUE_URL,
                     MessageBody=json.dumps(message),
-                    MessageGroupId=email,
-                    MessageDeduplicationId=f"{email}-{int(time.time() * 1000)}"
+                    MessageGroupId=email_prefix, # Use email_prefix for MessageGroupId
+                    MessageDeduplicationId=f"{email_prefix}-{int(time.time() * 1000)}"
                 )
-                return Response({
-                    'followup': True,
-                    'question': question,
-                    'question_number': followup_question_number,
-                    'matched_keywords': matched_keywords,
-                    "message": "SQS에 요청 성공",
-                    "sqs_message_id": response['MessageId']
-                }, status=200)
+                logger.info("✅ SQS 메시지 전송 성공 (꼬리질문 TTS 트리거)")
             except Exception as e:
-                logger.error("❌ SQS 전송 중 오류: %s", str(e), exc_info=True)
-                return Response({
-                    "error": "SQS 전송 중 예외 발생",
-                    "detail": str(e)
-                }, status=500)
+                logger.error("❌ SQS 전송 중 오류 (꼬리질문 TTS): %s", str(e), exc_info=True)
+                return Response({"error": "SQS 전송 중 예외 발생", "detail": str(e)}, status=500)
+
+            # TTS 오디오 파일이 S3에 업로드될 때까지 대기
+            bucket_tts = settings.AWS_TTS_BUCKET_NAME
+            s3_audio_key = f"{email_prefix}/{followup_question_number}.wav" # 예상되는 S3 오디오 파일 경로
+
+            if not wait_for_s3_file(bucket_tts, s3_audio_key):
+                logger.error("❌ 꼬리질문 %s 오디오 파일 S3에 없음: %s", followup_question_number, s3_audio_key)
+                return Response({"error": "꼬리 질문 오디오 파일이 준비되지 않았습니다."}, status=500)
+
+            return Response({
+                'followup': True,
+                'question': question,
+                'question_number': followup_question_number,
+                'matched_keywords': matched_keywords,
+                "message": "꼬리 질문 및 TTS 준비 완료"
+            }, status=200)
 
         except Exception as e:
             logger.error("❌ [알 수 없는 오류] %s", str(e), exc_info=True)
@@ -1139,6 +1192,28 @@ def save_transcribed_text(request):
         "audio_path": request.data.get("audio_path"),
         "text_path": request.data.get("text_path")
     })
+
+# S3 파일 존재 여부 확인 및 대기 함수
+def wait_for_s3_file(bucket_name, key, timeout=15, interval=1):
+    s3_client = boto3.client('s3')
+    start_time = time.time()
+    while time.time() - start_time < timeout:
+        try:
+            s3_client.head_object(Bucket=bucket_name, Key=key)
+            logger.info("✅ S3 파일 확인됨: %s/%s", bucket_name, key)
+            return True
+        except ClientError as e:
+            if e.response['Error']['Code'] == '404':
+                logger.debug("⏳ S3 파일 대기 중: %s/%s", bucket_name, key)
+                time.sleep(interval)
+            else:
+                logger.error("❌ S3 파일 확인 중 오류 (%s): %s", key, e, exc_info=True)
+                return False
+        except Exception as e:
+            logger.error("❌ S3 파일 확인 중 예상치 못한 오류 (%s): %s", key, e, exc_info=True)
+            return False
+    logger.warning("⌛ S3 파일 타임아웃: %s/%s", bucket_name, key)
+    return False
 
 # 이력서를 불러와 텍스트 내용 추출 후 프론트엔드에 반환
 @api_view(['GET'])

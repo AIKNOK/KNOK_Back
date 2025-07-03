@@ -1075,8 +1075,8 @@ def decide_followup_question(request):
                 response = sqs.send_message(
                     QueueUrl=QUEUE_URL,
                     MessageBody=json.dumps(message),
-                    MessageGroupId=email,
-                    MessageDeduplicationId=f"{email}-{int(time.time() * 1000)}"
+                    MessageGroupId="global",
+                    MessageDeduplicationId=email
                 )
                 key    = f"{email_prefix}/{followup_question_number}.wav"
                 bucket = settings.AWS_TTS_BUCKET_NAME

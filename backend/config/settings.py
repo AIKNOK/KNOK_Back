@@ -18,7 +18,7 @@ from aws_xray_sdk.core import xray_recorder
 from aws_xray_sdk.core import patch_all
 
 import logging
-
+import json_log_formatter
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -174,6 +174,7 @@ AWS_S3_CUSTOM_DOMAIN = "ai-knok.com"
 AWS_TTS_BUCKET_NAME = os.environ.get("TTS_BUCKET_NAME")
 AWS_FOLLOWUP_QUESTION_BUCKET_NAME = os.environ.get("AWS_FOLLOWUP_QUESTION_BUCKET_NAME")
 AWS_SIMPLE_QUEUE_SERVICE = os.environ.get("AWS_SIMPLE_QUEUE_SERVICE")
+FASTAPI_WEBSOCKET_URL = os.environ.get("FASTAPI_WEBSOCKET_URL")
 
 try:
     print("✅ [settings.py] 환경변수 로드 완료")
@@ -222,15 +223,21 @@ LOGGING = {
     'version': 1,
     'disable_existing_loggers': False,
     'formatters': {
-        'default': {
-            'format': '[%(levelname)s] %(asctime)s %(name)s: %(message)s',
+        'json': {
+            '()': 'config.logging_json.CustomJsonFormatter',   
+        },
+    },
+    'filters': {
+        'add_xray_trace_id': {
+            '()': 'config.logging_xray_traceid.XRayTraceIdFilter',  # 파일명.클래스명
         },
     },
     'handlers': {
         'console': {
             'level': 'INFO',  # 기본 로그 레벨: INFO 이상만 출력
             'class': 'logging.StreamHandler',
-            'formatter': 'default',
+            'formatter': 'json',
+            'filters': ['add_xray_trace_id'],
         },
     },
     'root': {

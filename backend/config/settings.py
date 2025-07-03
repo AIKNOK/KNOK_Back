@@ -223,7 +223,12 @@ LOGGING = {
     'disable_existing_loggers': False,
     'formatters': {
         'default': {
-            'format': '[%(levelname)s] %(asctime)s %(name)s: %(message)s',
+            'format': '[%(levelname)s] %(asctime)s %(name)s [trace_id=%(trace_id)s]: %(message)s',
+        },
+    },
+    'filters': {
+        'add_xray_trace_id': {
+            '()': 'logging_xray_traceid.XRayTraceIdFilter',  # 파일명.클래스명
         },
     },
     'handlers': {
@@ -231,6 +236,7 @@ LOGGING = {
             'level': 'INFO',  # 기본 로그 레벨: INFO 이상만 출력
             'class': 'logging.StreamHandler',
             'formatter': 'default',
+            'filters': ['add_xray_trace_id'],
         },
     },
     'root': {

@@ -18,7 +18,7 @@ from aws_xray_sdk.core import xray_recorder
 from aws_xray_sdk.core import patch_all
 
 import logging
-
+import json_log_formatter
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -222,8 +222,8 @@ LOGGING = {
     'version': 1,
     'disable_existing_loggers': False,
     'formatters': {
-        'default': {
-            'format': '[%(levelname)s] %(asctime)s %(name)s [trace_id=%(trace_id)s]: %(message)s',
+        'json': {
+            '()': 'config.logging_json.CustomJsonFormatter',   
         },
     },
     'filters': {
@@ -235,7 +235,7 @@ LOGGING = {
         'console': {
             'level': 'INFO',  # 기본 로그 레벨: INFO 이상만 출력
             'class': 'logging.StreamHandler',
-            'formatter': 'default',
+            'formatter': 'json',
             'filters': ['add_xray_trace_id'],
         },
     },

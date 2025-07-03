@@ -228,7 +228,7 @@ LOGGING = {
     },
     'filters': {
         'add_xray_trace_id': {
-            '()': 'logging_xray_traceid.XRayTraceIdFilter',  # 파일명.클래스명
+            '()': 'config.logging_xray_traceid.XRayTraceIdFilter',  # 파일명.클래스명
         },
     },
     'handlers': {

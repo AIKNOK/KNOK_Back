@@ -32,6 +32,7 @@ import traceback
 import uuid
 import fitz
 import time, botocore
+import logging
 
 from django.conf import settings
 from .models import Resume

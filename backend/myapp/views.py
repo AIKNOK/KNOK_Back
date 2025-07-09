@@ -1267,8 +1267,15 @@ def merge_texts_from_s3_folder(email_prefix, upload_id):
     prefix = f"{email_prefix}/{upload_id}/text/"
     s3 = boto3.client('s3')
 
-    response = s3.list_objects_v2(Bucket=bucket_name, Prefix=prefix)
-    if 'Contents' not in response:
+    logger.info(f"[S3 병합] S3 Prefix: {prefix}")
+
+    try:
+        response = s3.list_objects_v2(Bucket=bucket_name, Prefix=prefix)
+        if 'Contents' not in response:
+            logger.warning(f"[S3 병합] No objects found under prefix: {prefix}")
+            return ""
+    except Exception as e:
+        logger.error(f"[S3 병합] Error listing objects from S3: {e}")
         return ""
 
     txt_keys = [
@@ -1277,13 +1284,24 @@ def merge_texts_from_s3_folder(email_prefix, upload_id):
         if obj['Key'].endswith(".txt")
     ]
 
+    if not txt_keys:
+        logger.warning(f"[S3 병합] No .txt files found under prefix: {prefix}")
+
     merged_text = ""
     for key in sorted(txt_keys):
-        obj = s3.get_object(Bucket=bucket_name, Key=key)
-        content = obj['Body'].read().decode('utf-8')
-        merged_text += content.strip() + "\n\n"
+        try:
+            obj = s3.get_object(Bucket=bucket_name, Key=key)
+            content = obj['Body'].read().decode('utf-8')
+            merged_text += content.strip() + "\n\n"
+            logger.info(f"[S3 병합] Appended content from: {key}")
+        except Exception as e:
+            logger.error(f"[S3 병합] Error reading key {key}: {e}")
+    
+    result = merged_text.strip()
+    if not result:
+        logger.warning(f"[S3 병합] 최종 병합 결과가 비어 있음: {prefix}")
 
-    return merged_text.strip()
+    return result
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])

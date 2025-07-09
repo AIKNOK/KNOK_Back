@@ -6,8 +6,16 @@ WORKDIR /app
 COPY requirements.backend.txt ./requirements.backend.txt
 COPY requirements.common.txt  ./requirements.common.txt
 
+# ffmpeg static 설치용 변수
+ENV FFMPEG_URL=https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz
+
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        gcc g++ make libpq-dev python3-dev libffi-dev libsndfile1 ffmpeg libgl1 git \
+        gcc g++ make libpq-dev python3-dev libffi-dev libsndfile1 libgl1 git curl xz-utils \
+    && curl -L $FFMPEG_URL | tar -xJ \
+    && cp ffmpeg-*-static/ffmpeg /usr/local/bin/ \
+    && cp ffmpeg-*-static/ffprobe /usr/local/bin/ \
+    && chmod +x /usr/local/bin/ffmpeg /usr/local/bin/ffprobe \
+    && rm -rf ffmpeg-*-static \
     && rm -rf /var/lib/apt/lists/* \
     && pip install --upgrade pip \
     && pip install --no-cache-dir -r requirements.backend.txt
@@ -29,7 +37,8 @@ FROM python:3.10-slim
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PYTHONPATH="/app:/app/backend" \        
-    HF_HOME=/root/.cache/huggingface
+    HF_HOME=/root/.cache/huggingface \
+    FFMPEG_URL=https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz
 
 # ───── 고정 질문 오디오 ─────
 WORKDIR /app/audio
@@ -39,7 +48,12 @@ COPY audio /app/audio
 WORKDIR /app/backend
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        libpq-dev libsndfile1 ffmpeg libgl1 \
+        libpq-dev libsndfile1 libgl1 curl xz-utils \
+    && curl -L $FFMPEG_URL | tar -xJ \
+    && cp ffmpeg-*-static/ffmpeg /usr/local/bin/ \
+    && cp ffmpeg-*-static/ffprobe /usr/local/bin/ \
+    && chmod +x /usr/local/bin/ffmpeg /usr/local/bin/ffprobe \
+    && rm -rf ffmpeg-*-static \
     && rm -rf /var/lib/apt/lists/*
 
 # site-packages & 실행 파일
